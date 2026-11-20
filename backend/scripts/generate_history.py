@@ -18,6 +18,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from app.audit import Actor, RequestMeta, Resource, build_event
+from app.contract_v1 import to_v1
 from app.db import SessionLocal
 from app.models import Guest, LoyaltyAccount, Partner, Reservation, Staff
 
@@ -39,7 +40,8 @@ class Gen:
 
     def emit(self, ts: datetime, action: str, category: str, actor: Actor, path: str, method: str = "GET", **kw):
         event = build_event(action=action, category=category, actor=actor, ts=ts.astimezone(timezone.utc),
-                            request=RequestMeta(request_id=str(uuid.uuid4()), method=method, path=path), **kw)
+                            request=RequestMeta(request_id=str(uuid.uuid4()), method=method, path=path, route=path,
+                                                status_code=200, latency_ms=self.rng.randint(15, 180)), **kw)
         event["source"]["component"] = "history-generator"
         self.events.append(event)
 
@@ -64,6 +66,8 @@ def main():
     parser.add_argument("--days", type=int, default=30)
     parser.add_argument("--out", default="data/history_events.jsonl")
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--format", choices=["v1", "internal"], default="v1",
+                        help="v1 = STAYSEC HMS contract envelope (default), internal = raw StayDesk audit events")
     args = parser.parse_args()
     rng = random.Random(args.seed)
 
@@ -90,7 +94,7 @@ def main():
     for offset in range(args.days, 0, -1):
         day = today - timedelta(days=offset)
         for s in staff:
-            if s.role == "corporate_admin" or rng.random() < 1 / 7:  # one day off a week
+            if s.role == "corporate_admin" or day.strftime("%a").upper() not in (s.shift_days or []):
                 continue
             start, end = shift_window(day, s)
             net = PROPERTY_NET.get(s.home_property_id, "10.0")
@@ -191,6 +195,10 @@ def main():
     gen.events.sort(key=lambda e: e["ts"])
     with out_path.open("w", encoding="utf-8") as fh:
         for event in gen.events:
+            if args.format == "v1":
+                event = to_v1(event)
+                if event is None:
+                    continue
             fh.write(json.dumps(event, separators=(",", ":")) + "\n")
     print(f"wrote {gen.count:,} events for {args.days} days to {out_path}")
 

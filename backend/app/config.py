@@ -19,15 +19,27 @@ class Settings(BaseSettings):
     trust_forwarded_for: bool = True
 
     # Security event delivery (transactional outbox -> sinks)
-    event_sinks: str = "file"
+    # EVENT_FORMAT: "v1" = STAYSEC HMS integration contract v1.0 (default), "internal" = raw StayDesk audit events
+    event_format: str = "v1"
+    event_sinks: str = "file"  # comma-separated: file, sqs, http, stdout
     event_file: str = "data/events.jsonl"
+    sqs_queue_url: str = ""
+    aws_region: str = "ap-south-1"
     ingest_url: str = ""
     ingest_api_key: str = ""
     ingest_hmac_secret: str = ""
     shipper_interval_seconds: float = 1.0
     shipper_batch_size: int = 200
+    heartbeat_seconds: int = 30
+    producer_service: str = "staydesk-api"
+    producer_instance: str = ""  # defaults to hostname
 
-    # Service-to-service key used by the monitoring platform for /context and /control
+    # STAYSEC contract secrets (shared privately by the STAYSEC team)
+    guest_ref_key: str = "dev-guest-ref-key"
+    staysec_signing_secret: str = "dev-staysec-signing-secret"
+    staysec_key_id: str = "staysec-1"
+
+    # Service-to-service key for the extended /context and /control APIs
     service_api_key: str = "dev-service-key"
 
     id_doc_dir: str = "data/id_docs"

@@ -1,4 +1,5 @@
 import uuid
+from dataclasses import replace
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -9,7 +10,8 @@ from sqlalchemy.orm import Session
 from .. import audit, security
 from ..config import get_settings
 from ..db import get_db
-from ..deps import Ctx, basic_actor, device_id, get_staff_ctx, client_ip, is_on_shift, local_now, staff_actor
+from ..deps import (Ctx, basic_actor, client_ip, device_id, get_staff_ctx, is_on_shift, local_now,
+                    request_meta, staff_actor)
 from ..models import PolicySetting, Staff, StaffDevice, StaffSession
 from ..policy import get_policy
 from ..rbac import ROLE_LABELS, permissions_for
@@ -77,8 +79,7 @@ def _open_session(db: Session, request: Request, staff: Staff, mfa_verified: boo
 def _issue(db: Session, request: Request, staff: Staff, mfa_verified: bool) -> dict:
     session, was_known = _open_session(db, request, staff, mfa_verified)
     actor = staff_actor(request, staff, session, device_known=was_known)
-    meta = audit.RequestMeta(request_id=getattr(request.state, "request_id", str(uuid.uuid4())),
-                             method=request.method, path=request.url.path)
+    meta = replace(request_meta(request), status_code=200)
     if not was_known:
         audit.emit(db, action="auth.new_device", category="auth", actor=actor, request=meta,
                    details={"device_id": session.device_id})
@@ -93,14 +94,24 @@ def _issue(db: Session, request: Request, staff: Staff, mfa_verified: bool) -> d
 def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
     username = body.username.strip()
     staff = db.query(Staff).filter(or_(Staff.id == username, Staff.email == username.lower())).first()
-    if staff is None or not security.verify_password(body.password, staff.password_hash):
-        ctx = Ctx(db, request, basic_actor(request, "staff", staff.id if staff else username[:60]))
-        ctx.deny("auth.login_failed", "auth", 401, "Invalid credentials",
-                 extra={"code": "invalid_credentials"})
+    if staff is None:
+        # Never record the attempted username for unknown users (it is often a mistyped password).
+        Ctx(db, request, basic_actor(request, "staff", None)).deny(
+            "auth.login_failed", "auth", 401, "Invalid credentials", event_code="UNKNOWN_USER",
+            extra={"code": "invalid_credentials"})
     known = db.get(StaffDevice, (staff.id, device_id(request))) is not None
     ctx = Ctx(db, request, staff_actor(request, staff, device_known=known), staff=staff)
-    if staff.status != "active":
-        ctx.deny("auth.login_blocked", "auth", 403, "Account suspended", extra={"code": "account_suspended"})
+    if not security.verify_password(body.password, staff.password_hash):
+        ctx.deny("auth.login_failed", "auth", 401, "Invalid credentials", event_code="BAD_PASSWORD",
+                 extra={"code": "invalid_credentials"})
+    now = security.utcnow()
+    if staff.status != "active" or (staff.locked_until and staff.locked_until > now):
+        ctx.deny("auth.login_blocked", "auth", 403, "Account locked", error_code="ACCOUNT_LOCKED",
+                 extra={"code": "account_suspended",
+                        "locked_until": staff.locked_until.isoformat() if staff.locked_until else None})
+    if staff.must_reset_password:
+        ctx.deny("auth.login_blocked", "auth", 403, "Password reset required", error_code="PASSWORD_RESET_REQUIRED",
+                 event_code="OTHER", extra={"code": "password_reset_required"})
 
     mfa_on_new_device, _ = get_policy(db, "new_device_mfa")
     if staff.mfa_enabled and mfa_on_new_device and not known:
@@ -123,9 +134,9 @@ def verify_mfa(body: MfaIn, request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail={"error": "invalid_challenge"})
     ctx = Ctx(db, request, staff_actor(request, staff, device_known=False), staff=staff)
     if claims.get("dev") != device_id(request):
-        ctx.deny("auth.mfa_failed", "auth", 401, "MFA challenge was issued to a different device")
+        ctx.deny("auth.mfa_failed", "auth", 401, "MFA challenge was issued to a different device", event_code="MFA_FAILED")
     if not security.verify_totp(staff.mfa_secret, body.code):
-        ctx.deny("auth.mfa_failed", "auth", 401, "Invalid MFA code", extra={"code": "invalid_mfa"})
+        ctx.deny("auth.mfa_failed", "auth", 401, "Invalid MFA code", event_code="MFA_FAILED", extra={"code": "invalid_mfa"})
     ctx.emit("auth.mfa_success", "auth")
     return _issue(db, request, staff, mfa_verified=True)
 
@@ -133,7 +144,7 @@ def verify_mfa(body: MfaIn, request: Request, db: Session = Depends(get_db)):
 @router.post("/step-up")
 def step_up(body: StepUpIn, ctx: Ctx = Depends(get_staff_ctx)):
     if not security.verify_totp(ctx.staff.mfa_secret, body.code):
-        ctx.deny("auth.step_up_failed", "auth", 401, "Invalid MFA code", extra={"code": "invalid_mfa"})
+        ctx.deny("auth.step_up_failed", "auth", 401, "Invalid MFA code", event_code="MFA_FAILED", extra={"code": "invalid_mfa"})
     ctx.session.step_up_at = security.utcnow()
     ctx.session.mfa_verified = True
     ctx.emit("auth.step_up_success", "auth")

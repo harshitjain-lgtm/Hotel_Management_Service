@@ -12,9 +12,9 @@ from ..audit import Resource
 from ..db import get_db
 from ..deps import Ctx, basic_actor, get_guest_ctx, get_staff_ctx
 from ..models import Guest, LoyaltyAccount, LoyaltyTransaction
-from ..policy import get_policy, is_enabled
+from ..policy import get_policy
 from ..queries import count_rows
-from ..serializers import guest_name
+from ..serializers import guest_name, vip_count
 from .. import pii
 
 router = APIRouter(prefix="/loyalty", tags=["loyalty"])
@@ -114,11 +114,11 @@ def list_accounts(
     stmt = stmt.order_by(*LOYALTY_SORTS.get(sort, LOYALTY_SORTS["points_desc"])())
     total = count_rows(ctx.db, stmt)
     rows = ctx.db.execute(stmt.offset((page - 1) * page_size).limit(page_size)).all()
-    masking = is_enabled(ctx.db, "pii_masking")
+    masking = ctx.masking()
     ctx.emit("loyalty.search", "loyalty", resource=Resource(
         type="loyalty_account", ids=[a.id for a, _ in rows], guest_ids=[a.guest_id for a, _ in rows],
         pii_fields=["name"] + ([] if masking else ["email"]), masked_fields=["email"] if masking else [],
-        query=query, extra={"total_matching": total,
+        query=query, extra={"total_matching": total, "vip_count": vip_count((a.guest_id, a) for a, _ in rows),
                             "points_visible": sum(a.points_balance for a, _ in rows)}))
     ctx.db.commit()
     return {"items": [_account_view(a, g, masking) for a, g in rows], "total": total, "page": page,
@@ -134,8 +134,10 @@ def get_account(account_id: str, ctx: Ctx = Depends(get_staff_ctx)):
     guest = ctx.db.get(Guest, account.guest_id)
     txns = (ctx.db.query(LoyaltyTransaction).filter(LoyaltyTransaction.account_id == account_id)
             .order_by(LoyaltyTransaction.id.desc()).limit(50).all())
-    masking = is_enabled(ctx.db, "pii_masking")
-    ctx.emit("loyalty.view", "loyalty", resource=_resource(account))
+    masking = ctx.masking()
+    resource = _resource(account)
+    resource.extra["vip_count"] = vip_count([(account.guest_id, account)])
+    ctx.emit("loyalty.view", "loyalty", resource=resource)
     ctx.db.commit()
     return {**_account_view(account, guest, masking), "transactions": [_txn_view(t) for t in txns]}
 

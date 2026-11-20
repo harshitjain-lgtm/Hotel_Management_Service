@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from .. import security
 from ..audit import Resource
 from ..deps import Ctx, get_staff_ctx
+from ..hms_events import active_sessions, emit_staff_reference, terminate_sessions
 from ..models import Partner, PolicySetting, Property, Staff
 from ..policy import POLICY_DEFS, policy_view
 from ..rbac import ROLE_LABELS, ROLE_PERMISSIONS
@@ -88,6 +89,11 @@ def update_staff(staff_id: str, body: StaffUpdateIn, ctx: Ctx = Depends(get_staf
             setattr(staff, field, value)
     ctx.emit("admin.staff_updated", "admin", resource=Resource(type="staff", ids=[staff_id]),
              details={"changes": changes})
+    if changes.get("status", {}).get("after") == "suspended":
+        terminate_sessions(ctx.db, staff, active_sessions(ctx.db, staff_id), reason_code="ADMIN",
+                           revoked_by=ctx.staff.id, message="Suspended by administrator")
+    if changes:
+        emit_staff_reference(ctx.db, staff)
     ctx.db.commit()
     return {"id": staff.id, "changes": changes}
 

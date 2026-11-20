@@ -22,7 +22,7 @@ from pathlib import Path
 from faker import Faker
 from sqlalchemy import insert
 
-from app import security
+from app import contract_v1, security
 from app.db import Base, SessionLocal, engine
 from app.models import (
     CardToken,
@@ -146,16 +146,20 @@ def main():
         staff_hash = security.hash_password(DEMO_STAFF_PASSWORD)
         en_in = fakers["en_IN"]
         staff_rows, device_rows = [], []
+        all_days = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
         for sid, role, home, scope, start, end in staff_specs():
             secret = security.new_totp_secret()
+            day_off = RNG.choice(all_days)
+            days = [d for d in all_days if d != day_off] if role in ("front_desk", "finance", "property_manager") else all_days[:5]
             name = en_in.name()
             staff_rows.append({"id": sid, "name": name, "email": f"{sid}@aranyahotels.example", "password_hash": staff_hash,
                                "role": role, "home_property_id": home, "property_scope": scope, "mfa_secret": secret,
-                               "mfa_enabled": True, "status": "active", "shift_start": start, "shift_end": end})
+                               "mfa_enabled": True, "status": "active", "shift_start": start, "shift_end": end,
+                               "shift_days": days})
             device_rows.append({"staff_id": sid, "device_id": f"dev-{sid}-desk",
                                 "first_seen": now - timedelta(days=200), "last_seen": now - timedelta(hours=8)})
             out["staff"].append({"id": sid, "name": name, "role": role, "home_property": home, "property_scope": scope,
-                                 "shift": f"{start:%H:%M}-{end:%H:%M}", "known_device_id": f"dev-{sid}-desk",
+                                 "shift": f"{start:%H:%M}-{end:%H:%M}", "shift_days": days, "known_device_id": f"dev-{sid}-desk",
                                  "mfa_secret": secret, "otpauth_uri": security.totp_uri(secret, sid)})
         chunked_insert(db, Staff, staff_rows)
         chunked_insert(db, StaffDevice, device_rows)
@@ -318,7 +322,9 @@ def main():
             "loyalty_mule_account": mule["id"],
             "ota_partner": "TRIPNEST",
         }
-        out["honeytokens"] = {"guest_ids": honeytoken_guest_ids, "loyalty_account_ids": honeytoken_loyalty_ids}
+        out["honeytokens"] = {"guest_ids": honeytoken_guest_ids, "loyalty_account_ids": honeytoken_loyalty_ids,
+                              # STAYSEC v1 guest_refs (HMAC with GUEST_REF_KEY) - what the monitoring side will see
+                              "guest_refs": [contract_v1.guest_ref(g) for g in honeytoken_guest_ids]}
         out["counts"] = {"guests": len(guest_rows), "loyalty_accounts": len(loyalty_rows), "reservations": len(res_rows),
                          "folio_items": len(folio_rows), "card_tokens": len(card_rows), "id_documents": len(doc_rows),
                          "reservations_with_card_numbers_in_notes": len(CARD_IN_NOTES),

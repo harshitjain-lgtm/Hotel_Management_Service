@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from .. import security
+from .. import contract_v1, security
 from ..audit import Resource
 from ..deps import Ctx, get_service_ctx
 from ..models import (
@@ -23,8 +23,9 @@ from ..models import (
     Property,
     Staff,
     StaffDevice,
-    StaffSession,
 )
+from ..config import get_settings
+from ..hms_events import active_sessions, emit_staff_reference, terminate_sessions
 from ..policy import policy_view
 from .admin import apply_policy_change
 
@@ -66,13 +67,19 @@ def ctx_policies(ctx: Ctx = Depends(get_service_ctx)):
 
 
 class ClassifyIn(BaseModel):
-    guest_ids: list[str] = Field(max_length=50_000)
+    guest_ids: list[str] = Field(default_factory=list, max_length=50_000)
+    guest_refs: list[str] = Field(default_factory=list, max_length=50_000)  # STAYSEC v1 HMAC guest references
 
 
 @context.post("/guests/classify")
 def ctx_classify(body: ClassifyIn, ctx: Ctx = Depends(get_service_ctx)):
-    """Blast-radius helper: counts of data classes for a set of guests. Returns counts only, never PII values."""
+    """Blast-radius helper: counts of data classes for a set of guests (by internal id or STAYSEC guest_ref).
+    Returns counts only, never PII values."""
     ids = list(dict.fromkeys(body.guest_ids))
+    if body.guest_refs:
+        wanted, key = set(body.guest_refs), get_settings().guest_ref_key
+        ids += [gid for (gid,) in ctx.db.execute(select(Guest.id)).all() if contract_v1.guest_ref(gid, key) in wanted]
+        ids = list(dict.fromkeys(ids))
     if not ids:
         return {"requested": 0, "found": 0}
     today = date.today()
@@ -97,7 +104,7 @@ def ctx_classify(body: ClassifyIn, ctx: Ctx = Depends(get_service_ctx)):
         select(g.nationality, func.count()).where(g.id.in_(ids)).group_by(g.nationality)
     ).all())
     return {
-        "requested": len(ids),
+        "requested": len(body.guest_ids) + len(body.guest_refs),
         "found": row[0],
         "with_passport": row[1],
         "with_aadhaar_last4": row[2],
@@ -130,15 +137,12 @@ def revoke_sessions(body: RevokeIn, ctx: Ctx = Depends(get_service_ctx)):
     staff = ctx.db.get(Staff, body.staff_id)
     if staff is None:
         raise HTTPException(status_code=404, detail={"error": "staff_not_found"})
-    now = security.utcnow()
-    active = ctx.db.query(StaffSession).filter(StaffSession.staff_id == staff.id, StaffSession.revoked_at.is_(None),
-                                               StaffSession.expires_at > now).all()
-    for s in active:
-        s.revoked_at, s.revoked_reason, s.revoked_by = now, body.reason, f"service:{ctx.actor.id}"
+    n = terminate_sessions(ctx.db, staff, active_sessions(ctx.db, staff.id), reason_code="ADMIN",
+                           revoked_by=f"service:{ctx.actor.id}", message=body.reason)
     ctx.emit("control.sessions_revoked", "control", resource=Resource(type="staff", ids=[staff.id]),
-             details={"sessions_revoked": len(active), **body.model_dump(exclude={"staff_id"})})
+             details={"sessions_revoked": n, **body.model_dump(exclude={"staff_id"})})
     ctx.db.commit()
-    return {"staff_id": staff.id, "sessions_revoked": len(active)}
+    return {"staff_id": staff.id, "sessions_revoked": n}
 
 
 @control.post("/staff/{staff_id}/suspend")
@@ -159,10 +163,9 @@ def _set_staff_status(ctx: Ctx, staff_id: str, status: str, body: ActionMeta) ->
     staff.status = status
     revoked = 0
     if status == "suspended":
-        now = security.utcnow()
-        for s in ctx.db.query(StaffSession).filter(StaffSession.staff_id == staff_id, StaffSession.revoked_at.is_(None)).all():
-            s.revoked_at, s.revoked_reason, s.revoked_by = now, body.reason, f"service:{ctx.actor.id}"
-            revoked += 1
+        revoked = terminate_sessions(ctx.db, staff, active_sessions(ctx.db, staff_id), reason_code="ADMIN",
+                                     revoked_by=f"service:{ctx.actor.id}", message=body.reason)
+    emit_staff_reference(ctx.db, staff)
     action = "control.staff_suspended" if status == "suspended" else "control.staff_reinstated"
     ctx.emit(action, "control", resource=Resource(type="staff", ids=[staff_id]),
              details={"before": before, "after": status, "sessions_revoked": revoked, **body.model_dump()})

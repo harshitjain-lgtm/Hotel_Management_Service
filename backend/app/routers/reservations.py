@@ -28,6 +28,7 @@ from ..serializers import (
     guest_full,
     guest_full_fields,
     reservation_row,
+    vip_count,
 )
 
 router = APIRouter(prefix="/reservations", tags=["reservations"])
@@ -89,7 +90,7 @@ def list_reservations(
     stmt = reservation_query(filters, ctx.scope())
     total = count_rows(ctx.db, stmt)
     rows = ctx.db.execute(stmt.offset((page - 1) * page_size).limit(page_size)).all()
-    masking = is_enabled(ctx.db, "pii_masking")
+    masking = ctx.masking()
     items = [reservation_row(r, g, la, masking) for r, g, la in rows]
 
     exposed, masked = guest_brief_fields(masking)
@@ -100,7 +101,7 @@ def list_reservations(
         properties=[r.property_id for r, _, _ in rows],
         pii_fields=exposed, masked_fields=masked,
         query={**filters.as_query(), "page": page, "page_size": page_size},
-        extra={"total_matching": total},
+        extra={"total_matching": total, "vip_count": vip_count((g.id, la) for _, g, la in rows)},
     ))
     ctx.db.commit()
     return {"items": items, "total": total, "page": page, "page_size": page_size}
@@ -110,7 +111,7 @@ def list_reservations(
 def get_reservation(rid: str, ctx: Ctx = Depends(get_staff_ctx)):
     ctx.require("reservations.read", "reservation.view", "data_access")
     r, g, la = load_reservation(ctx, rid, "reservation.view")
-    masking = is_enabled(ctx.db, "pii_masking")
+    masking = ctx.masking()
     docs = ctx.db.query(IdDocument).filter(IdDocument.guest_id == g.id).order_by(IdDocument.uploaded_at.desc()).all()
     folio = ctx.db.query(FolioItem).filter(FolioItem.reservation_id == r.id).all()
     charges = sum((f.amount for f in folio if f.kind == "charge"), Decimal(0))
@@ -120,7 +121,7 @@ def get_reservation(rid: str, ctx: Ctx = Depends(get_staff_ctx)):
     exposed, masked = guest_full_fields(g, masking)
     ctx.emit("reservation.view", "data_access", resource=Resource(
         type="reservation", ids=[r.id], guest_ids=[g.id], properties=[r.property_id],
-        pii_fields=exposed, masked_fields=masked))
+        pii_fields=exposed, masked_fields=masked, extra={"vip_count": vip_count([(g.id, la)])}))
     ctx.db.commit()
 
     data = reservation_row(r, g, la, masking)
@@ -181,7 +182,7 @@ def export_reservations(body: ExportIn, ctx: Ctx = Depends(get_staff_ctx)):
                      extra={"code": "step_up_required", "rows": rows_to_export, "threshold": threshold})
 
     rows = ctx.db.execute(stmt.limit(rows_to_export)).all()
-    masking = is_enabled(ctx.db, "pii_masking")
+    masking = ctx.masking()
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(EXPORT_COLUMNS)
@@ -196,7 +197,7 @@ def export_reservations(body: ExportIn, ctx: Ctx = Depends(get_staff_ctx)):
         properties=[r.property_id for r, _, _ in rows],
         pii_fields=exposed, masked_fields=masked,
         query=query,
-        extra={"format": "csv", "bytes": len(buffer.getvalue())},
+        extra={"format": "csv", "bytes": len(buffer.getvalue()), "vip_count": vip_count((g.id, la) for _, g, la in rows)},
     ))
     ctx.db.commit()
     filename = f"reservations-export-{date.today().isoformat()}.csv"

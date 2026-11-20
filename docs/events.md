@@ -1,112 +1,114 @@
-# StayDesk security events (schema v0.1)
+# StayDesk ↔ STAYSEC integration (contract v1.0)
 
-StayDesk emits one event per security-relevant action, including **reads** (search, view, export) with record counts.
-Events are written to a transactional outbox in the same DB transaction as the action, then shipped to the
-configured sinks (`file`, `http`, `stdout`). Delivery is **at-least-once**, so de-duplicate on `event_id`.
+StayDesk implements the **STAYSEC x HMS integration handoff, contract v1.0**:
 
-> **Privacy by design:** events carry pseudonymous IDs (`G1004012`, `STY-…`, `AR2…`) and the *names* of the PII fields
-> exposed. They never carry PII values. Use `POST /context/guests/classify` to turn guest IDs into blast-radius counts.
+1. **Events in:** every security-relevant action is published to the STAYSEC SQS queue (`staysec-hms-events`) in the
+   v1.0 envelope. That includes logins, failures, guest-data reads with record counts, denials and changes.
+2. **Actions out:** `POST /internal/security/actions` lets STAYSEC end sessions, lock users, block IPs and more,
+   with HMAC-signed, idempotent requests.
 
-## Envelope
+Run `python -m scripts.check_contract` (in `backend/`, API running) to verify the section 8 conformance checklist.
+It runs 30 checks.
 
-```jsonc
+## How events flow
+
+```
+request ─► auth → RBAC → policy checks → handler
+                                   └─► internal audit event ─► event_outbox (same DB transaction as the action)
+shipper thread (every ~1s) ─► app/contract_v1.py: internal event → v1.0 envelope ─► SQS SendMessageBatch (10/call)
+                          └─► system.heartbeat every 30 s with queue_backlog
+```
+
+* **Asynchronous:** a user request never waits for SQS. The outbox is durable, so events survive restarts and SQS
+  outages and are retried with the same `event_id` (at-least-once delivery).
+* **Privacy:** guest IDs become `guest_refs = "h_" + HMAC_SHA256(GUEST_REF_KEY, guest_id)[:32]`. Responses are described
+  by field **names** (`fields_returned`), never values. The unknown usernames in failed logins are never sent.
+  The checker verifies no guest names, phones, emails, passport numbers or raw guest IDs appear in any event.
+* **Config:** `EVENT_FORMAT=v1`, `EVENT_SINKS=sqs` (plus `file` for local replay), `SQS_QUEUE_URL`, `AWS_REGION`,
+  `GUEST_REF_KEY`, `STAYSEC_SIGNING_SECRET`, `STAYSEC_KEY_ID`. See `backend/.env.example`.
+
+## Event types published
+
+| `event_type` | Published when | StayDesk source |
+|---|---|---|
+| `reference.property` | startup | 3 properties (MUM, GOA, JAI) |
+| `reference.staff` | startup, and on any role/scope/status/lock change | every staff user, with `assigned_property_ids` and `shift` (start, end, timezone, days); OTA integrations as `role: INTEGRATION` service accounts |
+| `reference.field_catalog` | startup | every field name we report, with its category (`IDENTITY_DOC`, `PAYMENT`, `CONTACT`, `STAY`, `LOYALTY`, `IDENTITY`) |
+| `auth.login.succeeded` | staff login (and guest-portal login, `data.realm = "guest_portal"`) | |
+| `auth.login.failed` | `BAD_PASSWORD`, `UNKNOWN_USER`, `ACCOUNT_LOCKED`, `MFA_FAILED`, `OTHER` | includes the MFA step (`data.stage = "mfa"`) and step-up MFA before bulk export (`"step_up"`) |
+| `data.access` | every response returning guest, reservation, payment, loyalty or ID-document data | search/list, detail, **export**, PII reveal, ID-document download, folio, loyalty, OTA partner API pulls |
+| `access.denied` | every 401/403 | `SESSION_REVOKED` (with `staysec_action_id`), `SESSION_EXPIRED`, `ACCOUNT_LOCKED`, `IP_BLOCKED`, `UNAUTHENTICATED`, `FORBIDDEN` (RBAC, property scope, or a security control, named in `data.policy`) |
+| `session.terminated` | a session ends other than by logout | `STAYSEC_ACTION` (with `staysec_action_id`), `ADMIN`, `PASSWORD_CHANGED` |
+| `auth.logout` | logout | |
+| `data.change` | create/update of reservations, ID documents, payments/refunds, loyalty points and contact details | `fields_changed` plus safe extras in `data.details` (e.g. `refund_to_new_instrument`, `points`, `new_domain`) |
+| `security.action.applied` | after applying a STAYSEC action | action, status, applied_at, details |
+| `system.heartbeat` | every 30 s | `queue_backlog` = unsent outbox events |
+| `security.control.changed` *(extension)* | a security control in the Policy Center is turned on/off (admin UI, StaySec action, or demo tooling) | `control`, `enabled_before/after`, `control_disabled` |
+| `security.control.triggered` *(extension)* | a control acted on its own (card numbers removed from free text) | `control`, `guest_refs` |
+
+### Optional fields StayDesk adds (additive within 1.x)
+
+* `actor.assigned_property_ids`, `actor.on_shift`, `actor.local_time`: our own roster check, so STAYSEC gets
+  out-of-scope and off-shift signals directly.
+* `client.device_known`: `false` until the device has passed MFA once.
+* `data.distinct_guests`, `data.sort` (e.g. `loyalty_points_desc`, the Marriott-2020 tell), `data.masked_fields`,
+  `data.export_bytes`, and `data.fields_beyond_contract` (OTA pulls that received fields outside their contract).
+* On `access.denied`: `data.attempted_action`, `data.policy`, `data.message`, `data.requested_record_count`.
+
+### Example: the headline attack's export
+
+```json
 {
-  "schema_version": "0.1",
-  "event_id": "uuid",                       // de-duplication key
-  "ts": "2026-11-20T09:59:14.511+00:00",    // UTC, real clock
-  "source": {"system": "staydesk", "component": "hm-backend", "env": "dev"},
-  "action": "reservation.export",           // see catalog below
-  "category": "data_access",                // auth | data_access | pii | payment | loyalty | partner | admin | control
-  "actor": {
-    "type": "staff",                        // staff | guest | partner | service | anonymous
-    "id": "rm_west_01",
-    "role": "regional_manager",
-    "home_property": "MUM",
-    "property_scope": ["MUM", "GOA", "JAI"],
-    "on_shift": false,                      // computed from the staff roster at the hotel's local time
-    "local_time": "03:12",                  // hotel local time (IST); demo mode can simulate it via X-Demo-Clock
-    "ip": "185.220.101.47",
-    "device_id": "dev-3f4263d1a1",
-    "device_known": false,                  // a device becomes known only after a successful MFA
-    "user_agent": "Mozilla/5.0 …",
-    "session_id": "uuid",
-    "mfa_verified": false
-  },
-  "outcome": {"result": "allowed", "reason": "…", "policy": "export_step_up"},  // result: allowed | denied
-  "resource": {
-    "type": "reservation",
-    "count": 4800,
-    "ids": ["STY-035VJFA7", "…"],           // capped at 10,000 (then "ids_truncated": true)
-    "guest_ids": ["G1004012", "…"],         // distinct
-    "distinct_guests": 1740,
-    "properties": ["GOA", "JAI", "MUM"],
-    "pii_fields": ["name", "nationality", "phone", "email", "dob", "passport_no"],  // exposed in clear
-    "masked_fields": ["aadhaar"],                                                  // returned masked
-    "query": {"sort": "loyalty_points_desc", "limit": 4800},
-    "…": "action-specific extras (total_matching, bytes, fields_beyond_contract, …)"
-  },
-  "details": {"…": "action-specific"},
-  "request": {"request_id": "uuid", "method": "POST", "path": "/reservations/export"}
+  "schema_version": "1.0", "event_id": "622654b3-…", "event_type": "data.access",
+  "occurred_at": "2026-11-20T10:21:08.446Z",
+  "producer": {"system": "hms", "service": "staydesk-api", "instance": "hms-1", "environment": "dev"},
+  "actor": {"user_id": "rm_west_01", "role": "REVENUE_MANAGER", "home_property_id": "MUM", "is_service_account": false,
+            "assigned_property_ids": ["MUM", "GOA", "JAI"], "on_shift": false, "local_time": "03:12"},
+  "session": {"session_id": "d3f51fea-…", "auth_method": "password", "mfa_verified": false, "issued_at": "2026-11-20T10:21:07.710Z"},
+  "client": {"ip": "185.220.101.47", "user_agent": "Mozilla/5.0 (X11; Linux x86_64; …) Firefox/128.0",
+             "device_id": "dev-b6e85b6812", "device_known": false},
+  "request": {"request_id": "12eb86e5-…", "method": "POST", "route": "/reservations/export", "status_code": 200, "latency_ms": 405},
+  "data": {"resource_type": "reservation", "operation": "export", "record_count": 4800,
+           "guest_refs": ["h_dab1e81f98df66a4fb904eb877bb0491", "… 1,763 distinct (first 2,000 max)"],
+           "property_ids": ["GOA", "JAI", "MUM"],
+           "fields_returned": ["reservation_id", "guest_name", "phone", "email", "dob", "passport_no", "…"],
+           "vip_record_count": 157, "export_format": "csv", "masked": false,
+           "distinct_guests": 1763, "sort": "loyalty_points_desc", "export_bytes": 965083}
 }
 ```
 
-Denied actions are events too (`outcome.result = "denied"`, with `reason` and, when a control blocked it, `policy`).
-Attempted attacks are signals in their own right.
+## Action endpoint
 
-## Catalog
+`POST /internal/security/actions`, implemented in `app/routers/security_actions.py`:
 
-| Action | Category | Emitted when | Useful fields |
-|---|---|---|---|
-| `auth.login_success` | auth | staff login completes | `details.mfa_verified`, `details.new_device`, actor ip/device/on_shift |
-| `auth.login_failed` / `auth.login_blocked` | auth | bad password / suspended account | `actor.id` is the attempted username |
-| `auth.new_device` | auth | login from a device not yet trusted | `details.device_id` |
-| `auth.mfa_challenge` / `auth.mfa_success` / `auth.mfa_failed` | auth | new-device MFA flow | |
-| `auth.step_up_success` / `auth.step_up_failed` | auth | step-up MFA before bulk export | |
-| `auth.logout` | auth | staff logout | |
-| `auth.session_rejected` | auth | request with a revoked/expired session or suspended account | `outcome.reason`; shows an attacker still trying after containment |
-| `auth.guest_login_success` / `auth.guest_login_failed` | auth | guest loyalty-portal login | failed: `resource.attempted_email_domain` (credential-stuffing bursts) |
-| `auth.guest_password_reset_requested` / `auth.guest_password_reset` | auth | portal password reset | |
-| `reservation.search` | data_access | reservation list/search | `resource.count`, `query.sort` (e.g. `loyalty_points_desc`), `total_matching`, `properties` |
-| `reservation.view` | data_access | reservation detail opened | |
-| `reservation.export` | data_access | CSV export (allowed or denied by `export_step_up`) | `count`, `distinct_guests`, `pii_fields`, `bytes`, `query` |
-| `reservation.create` / `reservation.update` | data_access | booking created / notes edited | `details.card_number_stored_in_free_text` when scrubbing is OFF |
-| `reservation.check_in` / `reservation.check_out` | data_access | front-desk workflow | |
-| `guest.search` / `guest.view` | data_access | guest list / profile | `query.sort` |
-| `pii.reveal` | pii | a masked field was revealed | `resource.pii_fields`, `details.reason` |
-| `pii.card_number_scrubbed` | pii | card number removed from free text | `details.card_numbers_removed` |
-| `id_document.upload` / `id_document.download` | pii | ID scan stored / opened | |
-| `folio.view` / `folio.charge` | payment | folio opened / charge posted | |
-| `payment.capture` | payment | payment taken | `details.new_card`, `details.card_token` |
-| `payment.refund_requested` | payment | refund created, pending approval | `details.refund_to_new_instrument`, `amount` |
-| `payment.refund_completed` | payment | refund completed **without** approval (control OFF) | same as above, `approved_by: null` |
-| `payment.refund_approved` / `payment.refund_rejected` | payment | second user decides | `details.requested_by` |
-| `loyalty.search` / `loyalty.view` | loyalty | staff loyalty lookups | `extra.points_visible` |
-| `loyalty.adjust` | loyalty | manual points adjustment by staff | `details.points`, `reason` |
-| `loyalty.redeem` / `loyalty.transfer` | loyalty | points spent / moved (staff or guest) | `details.points`, `to_account` |
-| `loyalty.contact_changed` | loyalty | portal email changed | `details.old_domain`, `new_domain` |
-| `partner.reservations_read` / `partner.reservation_read` | partner | OTA API pull | `extra.fields_returned`, `extra.fields_beyond_contract`, `pii_fields` |
-| `partner.reservation_created` | partner | OTA pushes a booking | |
-| `partner.auth_failed` | partner | invalid or revoked partner key | |
-| `admin.policy_changed` | admin | Policy Center toggle changed by a staff admin | `details.before/after`, `details.control_disabled` |
-| `admin.staff_updated` / `admin.partner_updated` | admin | role/scope/status or OTA allowlist changed | `details.changes`, `fields_added` |
-| `control.*` | control | a response action executed through the control API | `details.incident_id`, `reason`, `approved_by` |
+* Signature `v1=` + hex HMAC-SHA256 of `X-Staysec-Timestamp + "." + raw body`, verified over the raw bytes in
+  constant time. Missing headers, a timestamp more than 300 s off, an unknown `X-Staysec-Key-Id` or a mismatch return **401**.
+  A malformed body returns **400**.
+* Idempotent on `action_id`, stored in `security_actions`. A repeat returns the original response with status
+  `ALREADY_APPLIED`. `dry_run: true` validates and answers without changing anything.
+* Always **200** once processed: `APPLIED`, `ALREADY_APPLIED`, `NOT_FOUND`, `UNSUPPORTED`, `REJECTED` or `FAILED`.
+* The endpoint is exempt from IP blocking, so STAYSEC can always reach it. In AWS, restrict it to STAYSEC's
+  egress IP with the load balancer or security group.
 
-`control.*` actions: `sessions_revoked`, `staff_suspended`, `staff_reinstated`, `loyalty_frozen`, `loyalty_unfrozen`,
-`partner_key_rotated`, `policy_changed`.
+| `action` | `target` / `params` | Effect in StayDesk |
+|---|---|---|
+| `PING` | | `APPLIED` |
+| `REVOKE_SESSION` | `session_id` | next request gets `401 {"error":"SESSION_REVOKED","message":"Your session was ended by hotel security."}`; `session.terminated` + `access.denied` published |
+| `REVOKE_USER_SESSIONS` | `user_id` | all active sessions ended |
+| `LOCK_USER` / `UNLOCK_USER` | `user_id`, `duration_minutes` (null = indefinite) | logins get `403 {"error":"ACCOUNT_LOCKED"}`; existing sessions ended |
+| `BLOCK_IP` / `UNBLOCK_IP` | `ip`, `duration_minutes` | every request from that IP gets `403 {"error":"IP_BLOCKED"}` |
+| `SET_DATA_MASKING` | `session_id` or `user_id`, `mode` `MASKED`/`FULL` | per-session or per-user override of the masking control |
+| `FORCE_PASSWORD_RESET` | `user_id` | sessions ended; login refused until reset |
+| `SET_SECURITY_CONTROL` *(extension)* | `params.control`, `params.enabled` | turns a Policy Center control on/off (post-incident hardening) |
+| `FREEZE_LOYALTY` / `UNFREEZE_LOYALTY` *(extension)* | `target.guest_refs` or `target.account_ids` | blocks redemptions/transfers on affected loyalty accounts |
+| `ROTATE_PARTNER_KEY` *(extension)* | `target.partner_id` | revokes an OTA's API key (new key delivered out of band) |
 
-## Delivery (HTTP sink)
+Test any action with signed requests from the command line, e.g.:
+`python scenarios/demo_control.py action REVOKE_USER_SESSIONS user_id=rm_west_01`
 
-With `EVENT_SINKS=http` (or `file,http`), batches are POSTed every ~1s to `INGEST_URL`:
+## Blast radius after an incident
 
-```
-POST {INGEST_URL}
-Content-Type: application/json
-X-Api-Key: {INGEST_API_KEY}
-X-Signature: sha256=<hex HMAC-SHA256 of the raw body using INGEST_HMAC_SECRET>
-X-Source: staydesk
-X-Event-Count: 37
-
-{"events": [ {...}, {...} ]}
-```
-
-Any 2xx marks the batch delivered. Non-2xx responses and timeouts are retried with backoff, and nothing is lost while the receiver is down.
+STAYSEC holds only `guest_refs`. StayDesk can recompute refs over its guest table:
+`POST /context/guests/classify {"guest_refs": [...]}` (`X-Service-Key`) returns **counts only**: passports,
+Aadhaar, minors, foreign nationals, loyalty members and points, card tokens, ID scans, and nationality breakdown.
+The hotel uses the same mapping to build the DPDP Rule 7 notification list.

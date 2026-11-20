@@ -45,6 +45,11 @@ class Staff(Base):
     status: Mapped[str] = mapped_column(String(16), default="active")
     shift_start: Mapped[time] = mapped_column(Time)
     shift_end: Mapped[time] = mapped_column(Time)
+    shift_days: Mapped[list[str]] = mapped_column(ARRAY(String(3)), default=lambda: ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"])
+    # Set by STAYSEC actions (LOCK_USER, SET_DATA_MASKING, FORCE_PASSWORD_RESET)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    masking_override: Mapped[str | None] = mapped_column(String(8))  # MASKED | FULL
+    must_reset_password: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -72,6 +77,7 @@ class StaffSession(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_reason: Mapped[str | None] = mapped_column(String(300))
     revoked_by: Mapped[str | None] = mapped_column(String(60))
+    masking_override: Mapped[str | None] = mapped_column(String(8))  # MASKED | FULL (STAYSEC SET_DATA_MASKING)
 
 
 class Guest(Base):
@@ -214,6 +220,33 @@ class PolicySetting(Base):
     params: Mapped[dict] = mapped_column(JSONB, default=dict)
     updated_by: Mapped[str | None] = mapped_column(String(60))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class BlockedIp(Base):
+    """IPs blocked by STAYSEC (BLOCK_IP). Checked on every request."""
+
+    __tablename__ = "blocked_ips"
+
+    ip: Mapped[str] = mapped_column(String(64), primary_key=True)
+    until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # None = until unblocked
+    action_id: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SecurityAction(Base):
+    """Idempotency + audit log for actions received from STAYSEC on /internal/security/actions."""
+
+    __tablename__ = "security_actions"
+
+    action_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    action: Mapped[str] = mapped_column(String(40))
+    target: Mapped[dict] = mapped_column(JSONB, default=dict)
+    params: Mapped[dict] = mapped_column(JSONB, default=dict)
+    reason: Mapped[dict] = mapped_column(JSONB, default=dict)
+    requested_by: Mapped[str | None] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(20))
+    response: Mapped[dict] = mapped_column(JSONB, default=dict)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class EventOutbox(Base):

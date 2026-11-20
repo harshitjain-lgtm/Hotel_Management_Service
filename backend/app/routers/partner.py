@@ -13,7 +13,7 @@ from ..audit import Resource
 from ..deps import Ctx, get_partner_ctx
 from ..models import Guest, LoyaltyAccount, Reservation
 from ..policy import is_enabled
-from ..serializers import partner_full_record
+from ..serializers import partner_full_record, vip_count
 from .reservations import ROOM_RATES, new_reservation_id
 
 router = APIRouter(prefix="/partner/v1", tags=["partner-api"])
@@ -36,7 +36,8 @@ def _emit_read(ctx: Ctx, action: str, rows: list[tuple], records: list[dict], qu
         ids=[r.id for r, _, _ in rows], guest_ids=[g.id for _, g, _ in rows],
         properties=[r.property_id for r, _, _ in rows],
         pii_fields=sorted(PII_FIELDS & set(returned)), query=query,
-        extra={"fields_returned": returned, "fields_beyond_contract": sorted(set(returned) - allowed)},
+        extra={"fields_returned": returned, "fields_beyond_contract": sorted(set(returned) - allowed),
+               "vip_count": vip_count((g.id, la) for _, g, la in rows)},
     ))
 
 

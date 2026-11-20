@@ -9,9 +9,9 @@ from .. import security
 from ..audit import Resource
 from ..deps import Ctx, get_staff_ctx
 from ..models import Guest, IdDocument, LoyaltyAccount, Reservation
-from ..policy import is_enabled
+
 from ..queries import count_rows
-from ..serializers import guest_brief, guest_brief_fields, guest_full, guest_full_fields, reservation_row
+from ..serializers import guest_brief, guest_brief_fields, guest_full, guest_full_fields, reservation_row, vip_count
 
 router = APIRouter(prefix="/guests", tags=["guests"])
 docs_router = APIRouter(prefix="/id-documents", tags=["guests"])
@@ -70,11 +70,12 @@ def list_guests(
     stmt = stmt.order_by(*GUEST_SORTS.get(sort, GUEST_SORTS["name_asc"])())
     total = count_rows(ctx.db, stmt)
     rows = ctx.db.execute(stmt.offset((page - 1) * page_size).limit(page_size)).all()
-    masking = is_enabled(ctx.db, "pii_masking")
+    masking = ctx.masking()
     exposed, masked = guest_brief_fields(masking)
     ctx.emit("guest.search", "data_access", resource=Resource(
         type="guest", ids=[g.id for g, _ in rows], guest_ids=[g.id for g, _ in rows],
-        pii_fields=exposed, masked_fields=masked, query=query, extra={"total_matching": total}))
+        pii_fields=exposed, masked_fields=masked, query=query,
+        extra={"total_matching": total, "vip_count": vip_count((g.id, la) for g, la in rows)}))
     ctx.db.commit()
     return {"items": [guest_brief(g, la, masking) for g, la in rows], "total": total, "page": page,
             "page_size": page_size}
@@ -84,7 +85,7 @@ def list_guests(
 def get_guest(gid: str, ctx: Ctx = Depends(get_staff_ctx)):
     ctx.require("guests.read", "guest.view", "data_access")
     guest, account = load_guest(ctx, gid, "guest.view")
-    masking = is_enabled(ctx.db, "pii_masking")
+    masking = ctx.masking()
     stays_stmt = (select(Reservation, Guest, LoyaltyAccount)
                   .join(Guest, Guest.id == Reservation.guest_id)
                   .outerjoin(LoyaltyAccount, LoyaltyAccount.guest_id == Guest.id)
@@ -98,7 +99,7 @@ def get_guest(gid: str, ctx: Ctx = Depends(get_staff_ctx)):
     exposed, masked = guest_full_fields(guest, masking)
     ctx.emit("guest.view", "data_access", resource=Resource(
         type="guest", ids=[gid], guest_ids=[gid], properties=[r.property_id for r, _, _ in stays],
-        pii_fields=exposed, masked_fields=masked))
+        pii_fields=exposed, masked_fields=masked, extra={"vip_count": vip_count([(gid, account)])}))
     ctx.db.commit()
     data = guest_full(guest, account, masking)
     data["stays"] = [reservation_row(r, g, la, masking) for r, g, la in stays]
@@ -122,7 +123,7 @@ def reveal(gid: str, body: RevealIn, ctx: Ctx = Depends(get_staff_ctx)):
     if body.field not in REVEALABLE:
         raise HTTPException(status_code=422, detail={"error": "field_not_revealable", "allowed": sorted(REVEALABLE)})
     guest, _ = load_guest(ctx, gid, "pii.reveal")
-    masking = is_enabled(ctx.db, "pii_masking")
+    masking = ctx.masking()
     reason = (body.reason or "").strip()
     if masking and len(reason) < 5:
         ctx.deny("pii.reveal", "pii", 422, "A reason is required to reveal guest identity data",

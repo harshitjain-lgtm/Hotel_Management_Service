@@ -34,6 +34,7 @@ class Actor:
     device_known: bool | None = None
     user_agent: str | None = None
     session_id: str | None = None
+    session_issued_at: str | None = None
     mfa_verified: bool | None = None
 
     def to_dict(self) -> dict:
@@ -45,6 +46,9 @@ class RequestMeta:
     request_id: str
     method: str
     path: str
+    route: str | None = None  # route template, e.g. /reservations/{rid}
+    status_code: int | None = None
+    latency_ms: int | None = None
 
 
 @dataclass
@@ -103,6 +107,7 @@ def build_event(
     outcome: str = "allowed",
     reason: str | None = None,
     policy: str | None = None,
+    code: str | None = None,
     details: dict | None = None,
     ts: datetime | None = None,
 ) -> dict:
@@ -120,12 +125,14 @@ def build_event(
         event["outcome"]["reason"] = reason
     if policy:
         event["outcome"]["policy"] = policy
+    if code:
+        event["outcome"]["code"] = code
     if resource is not None:
         event["resource"] = resource.to_dict() if isinstance(resource, Resource) else resource
     if details:
         event["details"] = details
     if request is not None:
-        event["request"] = asdict(request)
+        event["request"] = {k: v for k, v in asdict(request).items() if v is not None}
     return json.loads(json.dumps(event, default=_json_default))
 
 

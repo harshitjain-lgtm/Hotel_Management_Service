@@ -145,3 +145,8 @@ def partner_full_record(r: Reservation, g: Guest, la: LoyaltyAccount | None) -> 
         "loyalty_tier": la.tier if la else None,
         "loyalty_points": la.points_balance if la else None,
     }
+
+
+def vip_count(pairs) -> int:
+    """Distinct VIP guests (Platinum loyalty tier) among (guest_id, LoyaltyAccount|None) pairs."""
+    return len({gid for gid, la in pairs if la is not None and la.tier == "Platinum"})
