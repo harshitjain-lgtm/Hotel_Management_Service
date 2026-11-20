@@ -11,6 +11,7 @@ Outputs:
 
 import argparse
 import json
+import os
 import random
 import secrets
 import string
@@ -43,8 +44,9 @@ RNG = random.Random(42)
 Faker.seed(42)
 IST = timezone(timedelta(hours=5, minutes=30))
 
-DEMO_STAFF_PASSWORD = "StayDesk@2026"
-DEMO_GUEST_PASSWORD = "Guest@2026"
+# Local defaults are public (README). Deployed environments set SEED_PASSWORD / SEED_GUEST_PASSWORD from Secrets Manager.
+DEMO_STAFF_PASSWORD = os.environ.get("SEED_PASSWORD") or "StayDesk@2026"
+DEMO_GUEST_PASSWORD = os.environ.get("SEED_GUEST_PASSWORD") or "Guest@2026"
 EMAIL_DOMAINS = ["example.com", "example.net", "example.org", "mail.example", "inbox.example"]
 
 PROPERTIES = [
@@ -335,7 +337,8 @@ def main():
     (data_dir / "seed_output.json").write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
     (data_dir / "honeytokens.json").write_text(json.dumps(out["honeytokens"], indent=2), encoding="utf-8")
     print(json.dumps(out["counts"], indent=2))
-    print(f"Staff password: {DEMO_STAFF_PASSWORD} | demo secrets written to {data_dir / 'seed_output.json'}")
+    shown = "(from SEED_PASSWORD, not printed)" if os.environ.get("SEED_PASSWORD") else DEMO_STAFF_PASSWORD
+    print(f"Staff password: {shown} | demo secrets written to {data_dir / 'seed_output.json'}")
 
 
 if __name__ == "__main__":

@@ -37,12 +37,23 @@ class ApiError(Exception):
         self.body = {"error": error, "message": message or CONTRACT_MESSAGES.get(error, error), "detail": detail or {}}
 
 
+def peer_ip(request: Request) -> str | None:
+    """The real connecting client, not spoofable by the caller: CloudFront's viewer address when deployed behind
+    CloudFront, otherwise the TCP peer."""
+    viewer = request.headers.get("cloudfront-viewer-address")
+    if viewer:
+        return viewer.rsplit(":", 1)[0].strip("[]")
+    return request.client.host if request.client else None
+
+
 def client_ip(request: Request) -> str | None:
+    """Client IP for security events. With TRUST_FORWARDED_FOR (demo env only) the first X-Forwarded-For address is
+    honoured, so attack scripts can appear to come from an external IP (contract section 7)."""
     if get_settings().trust_forwarded_for:
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
             return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else None
+    return peer_ip(request)
 
 
 def device_id(request: Request) -> str:
@@ -175,13 +186,9 @@ class Ctx:
 
     def masking(self) -> bool:
         """Whether sensitive guest fields are masked for this request.
-        Precedence: session override > user override (STAYSEC SET_DATA_MASKING) > global pii_masking control."""
-        for override in (self.session.masking_override if self.session else None,
-                         self.staff.masking_override if self.staff else None):
-            if override == "MASKED":
-                return True
-            if override == "FULL":
-                return False
+        A STAYSEC SET_DATA_MASKING override (session or user) forces masking; otherwise the pii_masking control."""
+        if (self.session and self.session.masking_override == "MASKED") or                 (self.staff and self.staff.masking_override == "MASKED"):
+            return True
         return is_enabled(self.db, "pii_masking")
 
 

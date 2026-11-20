@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     guest_ref_key: str = "dev-guest-ref-key"
     staysec_signing_secret: str = "dev-staysec-signing-secret"
     staysec_key_id: str = "staysec-1"
+    # Optional: only accept action calls from this IP (STAYSEC's fixed egress IP). Empty = signature check only.
+    staysec_egress_ip: str = ""
 
     # Service-to-service key for the extended /context and /control APIs
     service_api_key: str = "dev-service-key"

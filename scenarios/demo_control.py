@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from common import DEFAULT_BASE, SERVICE_KEY, ok, step, warn
+from common import DEFAULT_BASE, DEFAULT_ROOT, SERVICE_KEY, ok, step, warn
 
 SIGNING_SECRET = os.environ.get("STAYSEC_SIGNING_SECRET", "dev-staysec-signing-secret")
 KEY_ID = os.environ.get("STAYSEC_KEY_ID", "staysec-1")
@@ -84,7 +84,7 @@ def send_action(action: str, pairs: list[str]) -> dict:
     }).encode()
     ts = str(int(time.time()))
     signature = "v1=" + hmac.new(SIGNING_SECRET.encode(), ts.encode() + b"." + body, hashlib.sha256).hexdigest()
-    response = httpx.post(f"{DEFAULT_BASE}/internal/security/actions", content=body, timeout=10, headers={
+    response = httpx.post(f"{DEFAULT_ROOT}/internal/security/actions", content=body, timeout=10, headers={
         "Content-Type": "application/json", "X-Staysec-Key-Id": KEY_ID, "X-Staysec-Timestamp": ts,
         "X-Staysec-Signature": signature, "Idempotency-Key": json.loads(body)["action_id"]})
     return {"http_status": response.status_code, **response.json()}

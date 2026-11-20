@@ -10,6 +10,7 @@ Usage (from backend/, API running on :8000):
 import hashlib
 import hmac
 import json
+import os
 import time
 import uuid
 from pathlib import Path
@@ -23,7 +24,8 @@ from app.db import SessionLocal
 from app.models import Guest
 from app.security import decrypt_str
 
-BASE = "http://127.0.0.1:8000"
+ROOT = os.environ.get("STAYDESK_URL", "http://127.0.0.1:8000").rstrip("/")
+BASE = ROOT + "/api"
 settings = get_settings()
 seed = json.loads(Path("data/seed_output.json").read_text(encoding="utf-8"))
 events_path = Path(settings.event_file)
@@ -42,10 +44,13 @@ def events() -> list[dict]:
     return [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+RUN_STARTED = ""  # only events from this run count (the file accumulates across runs)
+
+
 def wait_for(predicate, timeout=8.0):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        found = [e for e in events() if predicate(e)]
+        found = [e for e in events() if e.get("occurred_at", "") >= RUN_STARTED and predicate(e)]
         if found:
             return found
         time.sleep(0.5)
@@ -57,7 +62,7 @@ def signed(body: dict, *, secret=None, ts=None) -> httpx.Response:
     ts = str(ts if ts is not None else int(time.time()))
     sig = "v1=" + hmac.new((secret or settings.staysec_signing_secret).encode(), ts.encode() + b"." + raw,
                            hashlib.sha256).hexdigest()
-    return httpx.post(f"{BASE}/internal/security/actions", content=raw, timeout=10, headers={
+    return httpx.post(f"{ROOT}/internal/security/actions", content=raw, timeout=10, headers={
         "Content-Type": "application/json", "X-Staysec-Key-Id": settings.staysec_key_id,
         "X-Staysec-Timestamp": ts, "X-Staysec-Signature": sig})
 
@@ -83,12 +88,15 @@ def staff_client(staff_id: str, *, ip: str, device: str | None = None) -> tuple[
 
 
 def main():
+    global RUN_STARTED
+    from datetime import datetime, timezone
     print(f"events file: {events_path}  format: {settings.event_format}")
     # 1. heartbeat + reference data
     hb = wait_for(lambda e: e.get("event_type") == "system.heartbeat", timeout=65)
     check(bool(hb), "system.heartbeat published within 60 s of start", f"backlog={hb[0]['data'] if hb else None}")
     evs = events()
     types = {e.get("event_type") for e in evs}
+    RUN_STARTED = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     check({"reference.staff", "reference.property", "reference.field_catalog"} <= types, "reference.* sent at startup")
     staff_refs = [e for e in evs if e.get("event_type") == "reference.staff"]
     check(any(e["data"].get("shift", {}) and e["data"].get("assigned_property_ids") for e in staff_refs),
@@ -123,14 +131,14 @@ def main():
     check(r.status_code == 403 and bool(denied), "403 emits access.denied", denied[-1]["data"].get("reason") if denied else "")
 
     # 4. action endpoint: signatures, PING, idempotency
-    check(httpx.post(f"{BASE}/internal/security/actions", json={"action_id": "a", "action": "PING"}).status_code == 401,
+    check(httpx.post(f"{ROOT}/internal/security/actions", json={"action_id": "a", "action": "PING"}).status_code == 401,
           "unsigned action rejected with 401")
     check(signed({"action_id": "act_stale", "action": "PING"}, ts=int(time.time()) - 900).status_code == 401,
           "stale timestamp rejected with 401")
     check(signed({"action_id": "act_bad", "action": "PING"}, secret="wrong").status_code == 401, "bad signature rejected")
     r = action("PING")
     check(r.status_code == 200 and r.json()["status"] == "APPLIED", "PING returns 200 APPLIED")
-    r = httpx.post(f"{BASE}/internal/security/actions", content=b"{not json", headers={
+    r = httpx.post(f"{ROOT}/internal/security/actions", content=b"{not json", headers={
         "X-Staysec-Timestamp": str(int(time.time())), "X-Staysec-Signature": "v1=" + hmac.new(
             settings.staysec_signing_secret.encode(), str(int(time.time())).encode() + b".{not json", hashlib.sha256).hexdigest()})
     check(r.status_code == 400, "malformed body returns 400")
@@ -180,6 +188,7 @@ def main():
     action("SET_DATA_MASKING", {"user_id": "fd_goa_02"}, {"mode": "MASKED"})
     masked = fd2.get("/reservations", params={"page_size": 1}).json()["items"][0]["guest"]["phone"]
     check("*" not in unmasked and "*" in masked, "SET_DATA_MASKING masks the user's responses", f"{unmasked} -> {masked}")
+    action("SET_DATA_MASKING", {"user_id": "fd_goa_02"}, {"mode": "FULL"})  # FULL clears the override
     action("SET_SECURITY_CONTROL", params={"control": "pii_masking", "enabled": True})
 
     # 9. no PII values anywhere in published events

@@ -21,6 +21,12 @@ React UI ──► StayDesk API (FastAPI) ──► PostgreSQL (RDS)
                  └── /context/* · /control/*  ◄── extended APIs (blast-radius counts, demo tooling)
 ```
 
+## Deployed environment
+
+**https://d8retztu3ojgt.cloudfront.net**: AWS ap-south-1, behind CloudFront (CDN + TLS). The React app is on S3,
+the API runs on ECS Fargate, the database is RDS PostgreSQL, and events go to STAYSEC's SQS queue. Architecture,
+deploy/ops scripts, resource inventory and teardown are in [`infra/README.md`](infra/README.md).
+
 ## Repository layout
 
 | Path | What |
@@ -33,6 +39,8 @@ React UI ──► StayDesk API (FastAPI) ──► PostgreSQL (RDS)
 | `frontend/` | React + Vite + TypeScript staff app and guest loyalty portal |
 | `scenarios/` | Attack simulations, normal traffic generator, demo control |
 | `docs/events.md` | STAYSEC integration: published events, extensions, action endpoint |
+| `infra/` | AWS deploy and ops scripts, resource inventory, teardown |
+| `backend/Dockerfile` | API image (seeds an empty database on first boot when `SEED_IF_EMPTY=true`) |
 | `docker-compose.yml` | Local PostgreSQL 16 |
 
 ## Quick start (local)
@@ -50,7 +58,7 @@ python -m venv .venv
 cp .env.example .env                               # optional; defaults work locally
 .venv/Scripts/python -m scripts.seed --reset       # ~30s; writes data/seed_output.json
 .venv/Scripts/python -m uvicorn app.main:app --port 8000
-# API docs: http://127.0.0.1:8000/docs   (on Windows avoid --reload: orphaned reload workers can keep port 8000)
+# API docs: http://127.0.0.1:8000/docs   (application API under /api, STAYSEC actions at /internal/security/actions)   (on Windows avoid --reload: orphaned reload workers can keep port 8000)
 .venv/Scripts/python -m scripts.check_contract     # optional: STAYSEC contract conformance (30 checks)
 
 # 3. frontend (new terminal)
@@ -67,7 +75,8 @@ in the header sets the demo clock.
 
 ### Demo accounts
 
-All staff passwords are `StayDesk@2026`. MFA secrets (and `otpauth://` URIs for an authenticator app) are in
+**Local only:** all staff passwords are `StayDesk@2026`. The **deployed** environment uses private passwords
+(`SEED_PASSWORD` / `SEED_GUEST_PASSWORD` in Secrets Manager); fetch them with `bash infra/ops.sh seed-output`. MFA secrets (and `otpauth://` URIs for an authenticator app) are in
 `backend/data/seed_output.json`. That file is gitignored and regenerated on every seed. To get a current code quickly:
 `.venv/Scripts/python -m scripts.otp <staff_id>`. Logging in from a staff member's registered device needs no MFA; a new
 device does when `new_device_mfa` is ON.
@@ -123,8 +132,11 @@ python scenarios/demo_control.py reinstate rm_west_01 # reset after a containmen
 `[CONTAINED]` and the UI logs the user out with a "terminated by security monitoring" banner.
 
 STAYSEC's own attack script logs in as a **front-desk user and pages reservations across all properties**, which needs
-`property_scope` OFF (the `vulnerable` preset). Login: `POST /auth/login {"username","password"}` →
-`{"access_token"}`; list: `GET /reservations?page=N&page_size=200` with `Authorization: Bearer <token>`.
+`property_scope` OFF (the `vulnerable` preset). Login: `POST /api/auth/login {"username","password"}` →
+`{"access_token"}`; list: `GET /api/reservations?page=N&page_size=200` with `Authorization: Bearer <token>`.
+
+All tools take `STAYDESK_URL` (service root, default `http://127.0.0.1:8000`) and `STAYDESK_SEED` (seed output file),
+so they run against the deployed environment too. See `infra/README.md`.
 
 For a clean slate between rehearsals, re-run the seed: `python -m scripts.seed --reset` in `backend/`.
 
@@ -134,11 +146,11 @@ For a clean slate between rehearsals, re-run the seed: `python -m scripts.seed -
   `GUEST_REF_KEY`. Locally (default `EVENT_SINKS=file`) the same v1 events go to `backend/data/events.jsonl`.
 * **Action endpoint:** `POST /internal/security/actions`, verified with `STAYSEC_SIGNING_SECRET` / `STAYSEC_KEY_ID`.
   Supports every contract action plus `SET_SECURITY_CONTROL`, `FREEZE_LOYALTY` and `ROTATE_PARTNER_KEY`.
-* **Context API** (`X-Service-Key` header): `GET /context/staff` (roles, scope, shift roster, known devices),
-  `/context/properties`, `/context/partners`, `/context/policies`, and `POST /context/guests/classify` (blast radius: counts of
+* **Context API** (`X-Service-Key` header): `GET /api/context/staff` (roles, scope, shift roster, known devices),
+  `/api/context/properties`, `/api/context/partners`, `/api/context/policies`, and `POST /api/context/guests/classify` (blast radius: counts of
   passports, Aadhaar, minors, foreign nationals, loyalty points … for a list of guest IDs, never values).
-* **Control API** (`X-Service-Key`): `POST /control/sessions/revoke`, `/control/staff/{id}/suspend|reinstate`,
-  `/control/loyalty/freeze|unfreeze`, `/control/partners/{id}/rotate-key`, `PUT /control/policies/{key}`.
+* **Control API** (`X-Service-Key`): `POST /api/control/sessions/revoke`, `/api/control/staff/{id}/suspend|reinstate`,
+  `/api/control/loyalty/freeze|unfreeze`, `/api/control/partners/{id}/rotate-key`, `PUT /api/control/policies/{key}`.
   Each accepts `reason`, `incident_id` and `approved_by`, all recorded in the resulting `control.*` event.
 * **Baseline history:** `python -m scripts.generate_history --days 30` (in `backend/`) writes ~21k *normal* v1 events
   for the last 30 days to `backend/data/history_events.jsonl`, matching each staff member's real roster, so detection
@@ -152,9 +164,11 @@ See `backend/.env.example`. Key settings: `DATABASE_URL`, `JWT_SECRET`, `PII_ENC
 `EVENT_SINKS`, `SQS_QUEUE_URL`, `GUEST_REF_KEY`, `STAYSEC_SIGNING_SECRET`, `SERVICE_API_KEY`, `DEMO_MODE` (enables `X-Demo-Clock: HH:MM` to simulate the hotel's local time for
 off-shift demos; event timestamps always use the real clock).
 
-## AWS deployment (planned)
+## AWS deployment
 
-API on ECS Fargate (or Lambda), **RDS PostgreSQL** (GuardDuty RDS Protection anomaly detection works on PostgreSQL),
-Cognito for staff auth/MFA, S3 + KMS for ID documents, Secrets Manager for keys, and the React build on S3 + CloudFront.
+Live in ap-south-1. See [`infra/README.md`](infra/README.md). Stack: CloudFront → S3 (web) + ALB → ECS Fargate (API,
+SQS publisher, heartbeat) → RDS PostgreSQL 16 (private, encrypted), with secrets in Secrets Manager and logs in CloudWatch.
+App Runner (suggested in the build spec) was not used because it throttles CPU between requests, which would stall
+the background SQS flush and heartbeat.
 Events go to STAYSEC's SQS queue, published by the task role with `sqs:SendMessage`. The action endpoint is exposed
 only to STAYSEC's egress IP, enforced by the security group or ALB rule.

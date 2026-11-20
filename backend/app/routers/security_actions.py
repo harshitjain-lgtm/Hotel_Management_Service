@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from .. import contract_v1, security
 from ..config import get_settings
 from ..db import get_db
-from ..deps import Ctx, basic_actor
+from ..deps import Ctx, basic_actor, peer_ip
 from ..hms_events import active_sessions, emit_staff_reference, emit_v1, terminate_sessions
 from ..models import BlockedIp, LoyaltyAccount, Partner, PolicySetting, SecurityAction, Staff, StaffSession
 from ..policy import POLICY_DEFS
@@ -161,10 +161,12 @@ def set_data_masking(db, action_id, target, params, reason, dry_run):
         scope = "session"
     else:
         obj, scope = _staff(db, target), "user"
-    if obj.masking_override == mode:
+    # Build spec v2 11.2: MASKED forces masking; FULL clears the override (back to the normal masking rules).
+    new_value = "MASKED" if mode == "MASKED" else None
+    if obj.masking_override == new_value:
         raise Outcome("ALREADY_APPLIED", f"{scope} already {mode}")
     if not dry_run:
-        obj.masking_override = mode
+        obj.masking_override = new_value
     return {"scope": scope, "mode": mode}
 
 
@@ -259,6 +261,9 @@ HANDLERS = {
 async def security_action(request: Request, db: Session = Depends(get_db)):
     raw = await request.body()
     rejection = verify_signature(request, raw)
+    egress = get_settings().staysec_egress_ip
+    if not rejection and egress and peer_ip(request) != egress:
+        rejection = f"caller {peer_ip(request)} is not the STAYSEC egress IP"
     if rejection:
         Ctx(db, request, basic_actor(request, "service", "staysec?")).emit(
             "security.action_rejected", "control", status_code=401, outcome="denied", reason=rejection,

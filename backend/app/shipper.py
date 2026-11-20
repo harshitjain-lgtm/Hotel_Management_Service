@@ -12,6 +12,7 @@ Sinks: sqs (SendMessageBatch, 10 per call, message attribute event_type), file (
 
 import json
 import logging
+import re
 import threading
 import time
 import uuid
@@ -49,7 +50,9 @@ class SqsSink:
         import boto3  # imported lazily so local dev without AWS deps still works
 
         self.queue_url = queue_url
-        self.client = boto3.client("sqs", region_name=region)
+        # The queue may live in another region than the app (STAYSEC: us-east-1, HMS: ap-south-1).
+        match = re.match(r"https://sqs\.([a-z0-9-]+)\.amazonaws\.com/", queue_url)
+        self.client = boto3.client("sqs", region_name=match.group(1) if match else region)
 
     def send(self, events: list[dict]) -> None:
         for i in range(0, len(events), 10):

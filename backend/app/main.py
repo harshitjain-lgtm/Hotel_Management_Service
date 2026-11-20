@@ -25,7 +25,7 @@ settings = get_settings()
 log = logging.getLogger("staydesk")
 
 # Paths that are never subject to IP blocking (STAYSEC must always reach its action endpoint).
-IP_BLOCK_EXEMPT = ("/internal/security/actions", "/health", "/docs", "/openapi.json", "/redoc")
+IP_BLOCK_EXEMPT = ("/internal/security/actions", "/health", "/api/health", "/docs", "/openapi.json", "/redoc")
 
 
 @asynccontextmanager
@@ -98,14 +98,17 @@ async def api_error_handler(_: Request, exc: ApiError):
     return JSONResponse(status_code=exc.status_code, content=exc.body)
 
 
+# Application API under /api (build spec v2). The STAYSEC action endpoint and /health stay at the root.
 for module_router in (
     auth.router, reservations.router, guests.router, guests.docs_router, folio.router, loyalty.router,
-    loyalty.portal, partner.router, admin.router, service.context, service.control, security_actions.router,
+    loyalty.portal, partner.router, admin.router, service.context, service.control,
 ):
-    app.include_router(module_router)
+    app.include_router(module_router, prefix="/api")
+app.include_router(security_actions.router)
 
 
 @app.get("/health", tags=["ops"])
+@app.get("/api/health", tags=["ops"], include_in_schema=False)
 def health():
     with SessionLocal() as db:
         db.execute(text("select 1"))

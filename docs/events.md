@@ -109,6 +109,6 @@ Test any action with signed requests from the command line, e.g.:
 ## Blast radius after an incident
 
 STAYSEC holds only `guest_refs`. StayDesk can recompute refs over its guest table:
-`POST /context/guests/classify {"guest_refs": [...]}` (`X-Service-Key`) returns **counts only**: passports,
+`POST /api/context/guests/classify {"guest_refs": [...]}` (`X-Service-Key`) returns **counts only**: passports,
 Aadhaar, minors, foreign nationals, loyalty members and points, card tokens, ID scans, and nationality breakdown.
 The hotel uses the same mapping to build the DPDP Rule 7 notification list.

@@ -17,8 +17,11 @@ import httpx
 import pyotp
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_SEED = ROOT.parent / "backend" / "data" / "seed_output.json"
-DEFAULT_BASE = os.environ.get("STAYDESK_API", "http://127.0.0.1:8000")
+# STAYDESK_SEED: seed output to use (e.g. backend/data/seed_output.cloud.json for the deployed environment)
+DEFAULT_SEED = Path(os.environ.get("STAYDESK_SEED", ROOT.parent / "backend" / "data" / "seed_output.json"))
+# STAYDESK_URL = service root (e.g. https://<id>.cloudfront.net); the application API lives under /api
+DEFAULT_ROOT = os.environ.get("STAYDESK_URL", "http://127.0.0.1:8000").rstrip("/")
+DEFAULT_BASE = os.environ.get("STAYDESK_API", DEFAULT_ROOT + "/api")
 SERVICE_KEY = os.environ.get("STAYDESK_SERVICE_KEY", "dev-service-key")
 
 ATTACKER_UA = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
