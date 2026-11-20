@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(dirname "$0")/config.sh"
 
 cd "$REPO_ROOT/frontend"
-npm ci --silent
+[ -d node_modules ] || npm ci   # skip when installed (a running dev server locks node_modules on Windows)
 VITE_API_URL=/api npm run build
 # Hashed assets can be cached forever; index.html must always be revalidated.
 aws --profile "$AWS_PROFILE_NAME" s3 sync dist/assets "s3://$WEB_BUCKET/assets" --delete \

@@ -99,7 +99,8 @@ function normalizeDetail(json: unknown, statusText: string): ApiDetail {
 
 export async function api<T = unknown>(path: string, opts: RequestOptions = {}): Promise<T> {
   const { method = "GET", body, form, query, auth = "staff", raw } = opts;
-  const url = new URL(API_URL + path);
+  // API_URL may be absolute (local dev) or relative ("/api" behind CloudFront); resolve against the page origin.
+  const url = new URL(API_URL + path, window.location.origin);
   if (query) {
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, String(value));
