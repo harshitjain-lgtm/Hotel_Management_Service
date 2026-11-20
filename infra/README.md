@@ -26,7 +26,8 @@ All scripts use the dedicated AWS CLI profile `staysec-hack` (override with `AWS
 | Command | What it does |
 |---|---|
 | `bash infra/deploy-backend.sh` | Build image → push to ECR → roll the ECS service → wait until healthy |
-| `bash infra/deploy-frontend.sh` | Build React (`VITE_API_URL=/api`) → sync to S3 → invalidate CloudFront |
+| `bash infra/deploy-frontend.sh [ref]` | Build the **last commit** (default `HEAD`) in a clean checkout → check the bundle uses `/api` → sync to S3 → invalidate CloudFront → confirm the new bundle is served. Uncommitted work is never deployed. |
+| `python infra/e2e_check.py backend/data/seed_output.cloud.json` | **Real-browser check** of the live site (headless Edge): login + MFA, reservations, detail, Policy Center, guests, portal; fails on any API error or browser error. Run after every frontend deploy (needs `pip install playwright pyotp`) |
 | `bash infra/ops.sh status` | Service state, health, recent logs |
 | `bash infra/ops.sh logs 30m` | Tail logs; `[event] …` lines are the events sent to STAYSEC |
 | `bash infra/ops.sh seed-output` | Fetch the cloud demo secrets (MFA seeds, partner keys) into `backend/data/seed_output.cloud.json` (gitignored) |
