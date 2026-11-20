@@ -1,35 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CreditCard, LogIn, LogOut, Plus, RotateCcw, Save } from "lucide-react";
+import { ArrowLeft, BedDouble, CalendarDays, CreditCard, LogIn, LogOut, Moon, Plus, RotateCcw, Save, Users, Wallet } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ChannelBadge, FolioStatus, ReservationStatus, TierBadge } from "@/components/badges";
-import { GuestIdentityGrid, IdDocumentList } from "@/components/shared";
-import {
-  Badge,
-  Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  Field,
-  Input,
-  KeyValue,
-  LoadingBlock,
-  Modal,
-  Select,
-  TBody,
-  TD,
-  TH,
-  THead,
-  TR,
-  Table,
-  Textarea,
-} from "@/components/ui";
+import { MeterRow, RadialGauge } from "@/components/charts";
+import { EmptyState, Field, IconChip, InitialsAvatar, KeyValue, LoadingBlock, Modal, Reveal, SelectField } from "@/components/kit";
+import { GuestIdentityGrid, IdDocumentList, PiiBadge } from "@/components/shared";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/lib/toast";
 import type { Folio, ReservationDetail } from "@/lib/types";
-import { fmtDate, fmtDateTime, inr, titleCase } from "@/lib/utils";
+import { cn, fmtDate, fmtDateTime, inr, titleCase } from "@/lib/utils";
 
 type FolioModal = null | "charge" | "payment" | "refund";
 
@@ -49,14 +36,14 @@ function CardPicker({
   return (
     <>
       <Field label="Card">
-        <Select value={token} onChange={(e) => setToken(e.target.value)}>
-          {cards.map((c) => (
-            <option key={c.token} value={c.token}>
-              {c.brand.toUpperCase()} •••• {c.last4} (on file)
-            </option>
-          ))}
-          <option value="__new">New card…</option>
-        </Select>
+        <SelectField
+          value={token}
+          onChange={setToken}
+          options={[
+            ...cards.map((c) => ({ value: c.token, label: `${c.brand.toUpperCase()} •••• ${c.last4} (on file)` })),
+            { value: "__new", label: "New card…" },
+          ]}
+        />
       </Field>
       {token === "__new" && (
         <Field label="Card number" hint="Tokenised by the payment gateway immediately — never stored by StayDesk.">
@@ -115,14 +102,10 @@ function FolioActions({ rid, folio, modal, setModal }: { rid: string; folio: Fol
       open={modal !== null}
       onClose={() => setModal(null)}
       title={modal ? titles[modal] : ""}
-      description={
-        modal === "refund"
-          ? `Refundable: ${inr(folio.totals.paid - folio.totals.refunded - folio.totals.pending_refunds)}`
-          : undefined
-      }
+      description={modal === "refund" ? `Refundable: ${inr(folio.totals.paid - folio.totals.refunded - folio.totals.pending_refunds)}` : undefined}
       footer={
         <>
-          <Button variant="secondary" onClick={() => setModal(null)}>
+          <Button variant="outline" onClick={() => setModal(null)}>
             Cancel
           </Button>
           <Button onClick={() => mutation.mutate()} loading={mutation.isPending} disabled={!valid}>
@@ -177,11 +160,11 @@ function CheckInDialog({ rid, open, onClose }: { rid: string; open: boolean; onC
       title="Check in guest"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
           <Button onClick={() => mutation.mutate()} loading={mutation.isPending} disabled={!room.trim()}>
-            <LogIn className="h-4 w-4" /> Check in
+            <LogIn /> Check in
           </Button>
         </>
       }
@@ -190,18 +173,22 @@ function CheckInDialog({ rid, open, onClose }: { rid: string; open: boolean; onC
         <Input autoFocus value={room} onChange={(e) => setRoom(e.target.value)} placeholder="e.g. 412" />
       </Field>
       <Field label="ID document type">
-        <Select value={docType} onChange={(e) => setDocType(e.target.value)}>
-          <option value="passport">Passport</option>
-          <option value="aadhaar">Aadhaar (masked copy)</option>
-          <option value="driving_licence">Driving licence</option>
-        </Select>
+        <SelectField
+          value={docType}
+          onChange={setDocType}
+          options={[
+            { value: "passport", label: "Passport" },
+            { value: "aadhaar", label: "Aadhaar (masked copy)" },
+            { value: "driving_licence", label: "Driving licence" },
+          ]}
+        />
       </Field>
       <Field label="ID document scan (optional)" hint="Required for foreign nationals (Form C reporting).">
         <input
           type="file"
           accept="image/*,application/pdf"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-indigo-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-indigo-700 hover:file:bg-indigo-100"
+          className="block w-full cursor-pointer rounded-lg border border-dashed border-input bg-[#fafcff] p-2 text-sm text-ink-2 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-primary-soft file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-strong hover:file:bg-[#d4e8fc]"
         />
       </Field>
     </Modal>
@@ -215,10 +202,10 @@ function SpecialRequests({ r }: { r: ReservationDetail }) {
   useEffect(() => setText(r.special_requests ?? ""), [r.special_requests]);
   const mutation = useMutation({
     mutationFn: () =>
-      api<{ special_requests: string; card_numbers_removed?: number; card_number_stored_in_free_text?: boolean }>(
-        `/reservations/${r.id}/notes`,
-        { method: "PATCH", body: { special_requests: text } },
-      ),
+      api<{ special_requests: string; card_numbers_removed?: number; card_number_stored_in_free_text?: boolean }>(`/reservations/${r.id}/notes`, {
+        method: "PATCH",
+        body: { special_requests: text },
+      }),
     onSuccess: (res) => {
       if (res.card_numbers_removed) {
         toast.warning("Card number removed", `${res.card_numbers_removed} card number(s) were scrubbed from the note (PCI DSS).`);
@@ -237,17 +224,71 @@ function SpecialRequests({ r }: { r: ReservationDetail }) {
       <CardHeader>
         <CardTitle>Special requests &amp; notes</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2">
+      <CardContent className="space-y-3">
         <Textarea value={text} onChange={(e) => setText(e.target.value)} disabled={!editable} placeholder="No special requests" />
         {editable && (
           <div className="flex justify-end">
             <Button size="sm" onClick={() => mutation.mutate()} loading={mutation.isPending} disabled={text === (r.special_requests ?? "")}>
-              <Save className="h-3.5 w-3.5" /> Save
+              <Save /> Save
             </Button>
           </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function StayProgress({ r }: { r: ReservationDetail }) {
+  const day = 86_400_000;
+  const start = new Date(r.arrival).getTime();
+  const now = Date.now();
+  const elapsed = Math.floor((now - start) / day);
+  if (r.status === "checked_in") {
+    const night = Math.min(r.nights, Math.max(1, elapsed + 1));
+    return <MeterRow label="Stay progress" value={night} max={r.nights} display={`Night ${night} of ${r.nights}`} series="green" />;
+  }
+  if (r.status === "booked") {
+    const days = Math.ceil((start - now) / day);
+    return (
+      <p className="text-xs text-ink-2">
+        {days > 0 ? (
+          <>
+            Arrives in <span className="font-medium text-ink">{days}</span> day{days > 1 ? "s" : ""}
+          </>
+        ) : (
+          "Arriving today"
+        )}
+      </p>
+    );
+  }
+  return <MeterRow label="Stay progress" value={r.status === "checked_out" ? r.nights : 0} max={r.nights} display={r.status === "checked_out" ? "Completed" : "Cancelled"} series={r.status === "checked_out" ? "periwinkle" : "gray"} />;
+}
+
+function FolioSummary({ folio }: { folio: Folio }) {
+  const t = folio.totals;
+  const net = t.paid - t.refunded;
+  const ratio = t.charges > 0 ? net / t.charges : 0;
+  const max = Math.max(t.charges, t.paid, 1);
+  return (
+    <div className="grid grid-cols-1 items-center gap-6 border-b border-border px-5 pb-5 md:grid-cols-[220px_1fr]">
+      <RadialGauge
+        value={Math.max(0, net)}
+        max={Math.max(t.charges, 1)}
+        severity={ratio >= 1 ? "good" : "warning"}
+        caption="Settled"
+        center={<span className="text-2xl leading-none font-semibold text-ink">{t.charges > 0 ? Math.round(Math.min(ratio, 9.99) * 100) : 0}%</span>}
+      />
+      <div className="space-y-3.5">
+        <MeterRow label="Charges" value={t.charges} max={max} display={inr(t.charges)} series="blue" />
+        <MeterRow label="Paid" value={t.paid} max={max} display={inr(t.paid)} series="green" />
+        <MeterRow label="Refunded" value={t.refunded} max={max} display={inr(t.refunded)} series="periwinkle" />
+        <MeterRow label="Pending refunds" value={t.pending_refunds} max={max} display={inr(t.pending_refunds)} series="amber" />
+        <div className="flex items-center justify-between rounded-xl bg-[#f6f9fe] px-3.5 py-2.5 text-sm">
+          <span className="text-ink-2">Balance due</span>
+          <span className={cn("font-semibold tabular-nums", t.balance > 0 ? "text-danger" : "text-success")}>{inr(t.balance)}</span>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -272,39 +313,38 @@ export function ReservationDetailPage() {
     },
   });
 
-  if (res.isLoading) return <LoadingBlock />;
+  if (res.isLoading) return <LoadingBlock label="Loading reservation…" />;
   if (!res.data)
     return (
-      <div className="py-16 text-center text-sm text-slate-500">
-        Reservation unavailable. <Link to="/reservations" className="text-indigo-600 hover:underline">Back to reservations</Link>
-      </div>
+      <EmptyState title="Reservation unavailable" description="It may be outside your property scope, or it doesn't exist." />
     );
   const r = res.data;
   const g = r.guest;
+  const guests = `${r.adults} adult${r.adults > 1 ? "s" : ""}${r.children > 0 ? `, ${r.children} child${r.children > 1 ? "ren" : ""}` : ""}`;
 
   return (
     <div className="space-y-5">
       <div>
-        <Link to="/reservations" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800">
-          <ArrowLeft className="h-4 w-4" /> Reservations
+        <Link to="/reservations" className="inline-flex items-center gap-1.5 text-sm text-ink-2 transition-colors hover:text-primary">
+          <ArrowLeft className="size-4" /> Reservations
         </Link>
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="font-mono text-xl font-semibold text-slate-900">{r.id}</h1>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="font-mono text-2xl font-semibold tracking-tight text-ink">{r.id}</h1>
             <ReservationStatus status={r.status} />
             <ChannelBadge channel={r.channel} />
-            <Badge color="indigo">{r.property_id}</Badge>
+            <Badge tone="solid">{r.property_id}</Badge>
           </div>
           {can("reservations.write") && (
             <div className="flex gap-2">
               {r.status === "booked" && (
                 <Button onClick={() => setCheckIn(true)}>
-                  <LogIn className="h-4 w-4" /> Check in
+                  <LogIn /> Check in
                 </Button>
               )}
               {r.status === "checked_in" && (
-                <Button variant="secondary" onClick={() => checkOut.mutate()} loading={checkOut.isPending}>
-                  <LogOut className="h-4 w-4" /> Check out
+                <Button variant="outline-primary" onClick={() => checkOut.mutate()} loading={checkOut.isPending}>
+                  <LogOut /> Check out
                 </Button>
               )}
             </div>
@@ -314,147 +354,179 @@ export function ReservationDetailPage() {
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         <div className="space-y-5 xl:col-span-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>Stay</CardTitle>
-              <span className="text-xs text-slate-500">
-                Booked {fmtDateTime(r.created_at)} by {r.created_by ?? "—"}
-              </span>
-            </CardHeader>
-            <CardContent>
-              <dl className="grid grid-cols-2 gap-x-6 gap-y-3 md:grid-cols-4">
-                <KeyValue label="Arrival">{fmtDate(r.arrival)}</KeyValue>
-                <KeyValue label="Departure">{fmtDate(r.departure)}</KeyValue>
-                <KeyValue label="Nights">{r.nights}</KeyValue>
-                <KeyValue label="Guests">
-                  {r.adults} adult{r.adults > 1 ? "s" : ""}
-                  {r.children > 0 ? `, ${r.children} child${r.children > 1 ? "ren" : ""}` : ""}
-                </KeyValue>
-                <KeyValue label="Room type">{titleCase(r.room_type)}</KeyValue>
-                <KeyValue label="Room no.">{r.room_no ?? "—"}</KeyValue>
-                <KeyValue label="Total">{inr(r.total_amount)}</KeyValue>
-                <KeyValue label="Balance">{inr(r.folio_summary.balance)}</KeyValue>
-              </dl>
-            </CardContent>
-          </Card>
-
-          {can("folio.read") && (
+          <Reveal>
             <Card>
               <CardHeader>
-                <CardTitle>Folio</CardTitle>
-                <div className="flex gap-2">
-                  {can("folio.write") && (
-                    <>
-                      <Button size="sm" variant="secondary" onClick={() => setFolioModal("charge")} disabled={!folio.data}>
-                        <Plus className="h-3.5 w-3.5" /> Charge
-                      </Button>
-                      <Button size="sm" variant="secondary" onClick={() => setFolioModal("payment")} disabled={!folio.data}>
-                        <CreditCard className="h-3.5 w-3.5" /> Payment
-                      </Button>
-                    </>
-                  )}
-                  {can("refund.create") && (
-                    <Button size="sm" variant="secondary" onClick={() => setFolioModal("refund")} disabled={!folio.data}>
-                      <RotateCcw className="h-3.5 w-3.5" /> Refund
-                    </Button>
-                  )}
+                <div>
+                  <CardTitle>Stay</CardTitle>
+                  <CardDescription>
+                    Booked {fmtDateTime(r.created_at)} by {r.created_by ?? "—"}
+                  </CardDescription>
                 </div>
               </CardHeader>
-              {folio.isLoading || !folio.data ? (
-                <LoadingBlock />
-              ) : (
-                <>
-                  <Table>
-                    <THead>
-                      <tr>
-                        <TH>#</TH>
-                        <TH>Type</TH>
-                        <TH>Description</TH>
-                        <TH>Status</TH>
-                        <TH>By</TH>
-                        <TH>When</TH>
-                        <TH className="text-right">Amount</TH>
-                      </tr>
-                    </THead>
-                    <TBody>
-                      {folio.data.items.length === 0 && (
-                        <tr>
-                          <TD colSpan={7} className="py-6 text-center text-slate-500">
-                            No folio entries yet.
-                          </TD>
-                        </tr>
-                      )}
-                      {folio.data.items.map((f) => (
-                        <TR key={f.id}>
-                          <TD className="font-mono text-xs text-slate-500">{f.id}</TD>
-                          <TD className="capitalize">{f.kind}</TD>
-                          <TD>
-                            {f.description}
-                            {f.reason && <div className="text-xs text-slate-500">Reason: {f.reason}</div>}
-                          </TD>
-                          <TD>
-                            <FolioStatus status={f.status} />
-                          </TD>
-                          <TD className="text-xs">
-                            {f.created_by ?? "—"}
-                            {f.approved_by && <div className="text-slate-500">approved: {f.approved_by}</div>}
-                          </TD>
-                          <TD className="text-xs text-slate-500">{fmtDateTime(f.created_at)}</TD>
-                          <TD className={`text-right font-medium tabular-nums ${f.kind === "charge" ? "" : "text-emerald-700"}`}>
-                            {f.kind === "charge" ? "" : "−"}
-                            {inr(f.amount)}
-                          </TD>
-                        </TR>
-                      ))}
-                    </TBody>
-                  </Table>
-                  <div className="grid grid-cols-2 gap-3 border-t border-slate-100 px-5 py-3 text-sm md:grid-cols-5">
-                    <KeyValue label="Charges">{inr(folio.data.totals.charges)}</KeyValue>
-                    <KeyValue label="Paid">{inr(folio.data.totals.paid)}</KeyValue>
-                    <KeyValue label="Refunded">{inr(folio.data.totals.refunded)}</KeyValue>
-                    <KeyValue label="Pending refunds">{inr(folio.data.totals.pending_refunds)}</KeyValue>
-                    <KeyValue label="Balance">
-                      <span className="font-semibold">{inr(folio.data.totals.balance)}</span>
-                    </KeyValue>
-                  </div>
-                </>
-              )}
+              <CardContent className="space-y-5">
+                <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                  {[
+                    { icon: CalendarDays, tone: "violet" as const, label: "Arrival", value: fmtDate(r.arrival) },
+                    { icon: CalendarDays, tone: "orange" as const, label: "Departure", value: fmtDate(r.departure) },
+                    { icon: Moon, tone: "blue" as const, label: "Nights", value: String(r.nights) },
+                    { icon: Users, tone: "green" as const, label: "Guests", value: guests },
+                  ].map((s) => (
+                    <div key={s.label} className="flex items-center gap-3 rounded-xl border border-border bg-[#fafcff] p-3">
+                      <IconChip icon={s.icon} tone={s.tone} size="sm" />
+                      <div className="min-w-0 leading-tight">
+                        <p className="text-[11px] text-ink-3">{s.label}</p>
+                        <p className="truncate text-sm font-medium text-ink">{s.value}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <StayProgress r={r} />
+                <dl className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                  <KeyValue label="Room type">
+                    <span className="inline-flex items-center gap-1.5">
+                      <BedDouble className="size-4 text-ink-3" /> {titleCase(r.room_type)}
+                    </span>
+                  </KeyValue>
+                  <KeyValue label="Room no.">{r.room_no ?? "—"}</KeyValue>
+                  <KeyValue label="Total">{inr(r.total_amount)}</KeyValue>
+                  <KeyValue label="Balance">
+                    <span className={r.folio_summary.balance > 0 ? "font-semibold text-danger" : "font-semibold text-success"}>{inr(r.folio_summary.balance)}</span>
+                  </KeyValue>
+                </dl>
+              </CardContent>
             </Card>
+          </Reveal>
+
+          {can("folio.read") && (
+            <Reveal delay={0.06}>
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <IconChip icon={Wallet} tone="blue" size="sm" />
+                    <CardTitle>Folio</CardTitle>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {can("folio.write") && (
+                      <>
+                        <Button size="sm" variant="soft" onClick={() => setFolioModal("charge")} disabled={!folio.data}>
+                          <Plus /> Charge
+                        </Button>
+                        <Button size="sm" variant="soft" onClick={() => setFolioModal("payment")} disabled={!folio.data}>
+                          <CreditCard /> Payment
+                        </Button>
+                      </>
+                    )}
+                    {can("refund.create") && (
+                      <Button size="sm" variant="outline" onClick={() => setFolioModal("refund")} disabled={!folio.data}>
+                        <RotateCcw /> Refund
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+                {folio.isLoading || !folio.data ? (
+                  <LoadingBlock rows={4} />
+                ) : (
+                  <>
+                    <FolioSummary folio={folio.data} />
+                    <div className="p-5">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent">
+                            <TableHead>#</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Description</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>By</TableHead>
+                            <TableHead>When</TableHead>
+                            <TableHead className="text-right">Amount</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {folio.data.items.length === 0 && (
+                            <TableRow>
+                              <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                                No folio entries yet.
+                              </TableCell>
+                            </TableRow>
+                          )}
+                          {folio.data.items.map((f) => (
+                            <TableRow key={f.id}>
+                              <TableCell className="font-mono text-xs text-ink-3">{f.id}</TableCell>
+                              <TableCell>
+                                <Badge tone={f.kind === "charge" ? "blue" : f.kind === "payment" ? "green" : "violet"} className="capitalize">
+                                  {f.kind}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-ink">{f.description}</span>
+                                {f.reason && <div className="text-xs text-ink-3">Reason: {f.reason}</div>}
+                              </TableCell>
+                              <TableCell>
+                                <FolioStatus status={f.status} />
+                              </TableCell>
+                              <TableCell className="text-xs">
+                                {f.created_by ?? "—"}
+                                {f.approved_by && <div className="text-ink-3">approved: {f.approved_by}</div>}
+                              </TableCell>
+                              <TableCell className="text-xs text-ink-3">{fmtDateTime(f.created_at)}</TableCell>
+                              <TableCell className={cn("text-right font-semibold tabular-nums", f.kind === "charge" ? "text-ink" : "text-success")}>
+                                {f.kind === "charge" ? "" : "−"}
+                                {inr(f.amount)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </>
+                )}
+              </Card>
+            </Reveal>
           )}
         </div>
 
         <div className="space-y-5">
-          <Card>
-            <CardHeader>
-              <CardTitle>Guest</CardTitle>
-              {g.masked ? <Badge color="green">PII masked</Badge> : <Badge color="red">PII unmasked</Badge>}
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <Link to={`/guests/${g.id}`} className="text-base font-semibold text-slate-900 hover:underline">
-                  {g.name}
-                </Link>
-                <div className="mt-1 flex items-center gap-2">
-                  <span className="font-mono text-xs text-slate-500">{g.id}</span>
-                  {g.loyalty && (
-                    <Link to={`/loyalty/${g.loyalty.id}`}>
-                      <TierBadge tier={g.loyalty.tier} points={g.loyalty.points} />
+          <Reveal delay={0.04}>
+            <Card>
+              <CardHeader>
+                <CardTitle>Guest</CardTitle>
+                <PiiBadge masked={g.masked} />
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <div className="flex items-center gap-3">
+                  <InitialsAvatar name={g.name} className="size-12 text-sm" />
+                  <div className="min-w-0">
+                    <Link to={`/guests/${g.id}`} className="block truncate text-base font-semibold text-ink hover:text-primary">
+                      {g.name}
                     </Link>
-                  )}
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-xs text-ink-3">{g.id}</span>
+                      {g.loyalty && (
+                        <Link to={`/loyalty/${g.loyalty.id}`}>
+                          <TierBadge tier={g.loyalty.tier} points={g.loyalty.points} />
+                        </Link>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <GuestIdentityGrid guest={g} />
-            </CardContent>
-          </Card>
-          <SpecialRequests r={r} />
-          <Card>
-            <CardHeader>
-              <CardTitle>ID documents</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <IdDocumentList docs={r.id_documents} />
-            </CardContent>
-          </Card>
+                <GuestIdentityGrid guest={g} />
+              </CardContent>
+            </Card>
+          </Reveal>
+          <Reveal delay={0.08}>
+            <SpecialRequests r={r} />
+          </Reveal>
+          <Reveal delay={0.12}>
+            <Card>
+              <CardHeader>
+                <CardTitle>ID documents</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <IdDocumentList docs={r.id_documents} />
+              </CardContent>
+            </Card>
+          </Reveal>
         </div>
       </div>
 

@@ -1,12 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRightLeft, Gift, LogOut, Mail, ShieldAlert, Snowflake } from "lucide-react";
+import { ArrowRightLeft, CircleCheck, Gift, LogOut, Mail, ShieldAlert, Snowflake, type LucideIcon } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { TierBadge } from "@/components/badges";
-import { Button, Card, CardContent, CardHeader, CardTitle, Field, Input, LoadingBlock, TBody, TD, TH, THead, TR, Table } from "@/components/ui";
+import { AnimatedNumber, AreaTrend } from "@/components/charts";
+import { Field, IconChip, LoadingBlock, Reveal } from "@/components/kit";
+import GradientText from "@/components/reactbits/GradientText";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, ApiError, describeError } from "@/lib/api";
+import { balanceSeries, earnedRedeemed } from "@/lib/loyalty";
 import type { LoyaltyAccountDetail } from "@/lib/types";
-import { fmtDateTime } from "@/lib/utils";
+import { cn, fmtDateTime } from "@/lib/utils";
 
 const TOKEN_KEY = "staydesk.portal_token";
 
@@ -14,6 +21,12 @@ const DENIAL_COPY: Record<string, string> = {
   cooling_off: "For your security, redemptions and transfers are paused for 24 hours after your contact details change.",
   account_frozen: "Your account has been frozen by our security team. Please contact Aranya Rewards support.",
   insufficient_points: "You don't have enough points for this.",
+};
+
+const TIER_CARD: Record<string, string> = {
+  Platinum: "bg-[linear-gradient(135deg,#5c63c7,#8b5cf6_60%,#b794f6)]",
+  Gold: "bg-[linear-gradient(135deg,#d98f06,#efa00b_55%,#f6c453)]",
+  Silver: "bg-[linear-gradient(135deg,#64748b,#8a96a8_60%,#b8c2d0)]",
 };
 
 function denialText(err: unknown) {
@@ -43,20 +56,28 @@ function PortalLogin({ onToken }: { onToken: (t: string) => void }) {
     }
   };
   return (
-    <div className="mx-auto mt-16 w-full max-w-sm">
-      <Card>
+    <div className="mx-auto mt-10 w-full max-w-[420px] sm:mt-16">
+      <Card className="shadow-lift">
         <CardContent className="p-8">
-          <h1 className="text-xl font-semibold text-slate-900">Member sign in</h1>
-          <p className="mt-1 text-sm text-slate-500">Access your Aranya Rewards points and benefits.</p>
-          <form onSubmit={submit} className="mt-6 space-y-4">
+          <div className="mb-6 flex size-12 items-center justify-center rounded-2xl bg-gold-soft text-gold">
+            <Gift className="size-6" />
+          </div>
+          <h1 className="text-2xl font-semibold tracking-tight text-ink">Member sign in</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">Access your Aranya Rewards points and benefits.</p>
+          <form onSubmit={submit} className="mt-7 space-y-4">
             <Field label="Email">
-              <Input autoFocus type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <Input autoFocus type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className="h-11" />
             </Field>
             <Field label="Password">
-              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-11" />
             </Field>
-            {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-            <Button type="submit" size="lg" className="w-full bg-amber-600 hover:bg-amber-700" loading={busy} disabled={!email || !password}>
+            {error && (
+              <p className="flex items-start gap-2 rounded-xl bg-danger-soft px-3 py-2.5 text-sm text-[#a33131]" role="alert">
+                <ShieldAlert className="mt-0.5 size-4 shrink-0" />
+                {error}
+              </p>
+            )}
+            <Button type="submit" size="lg" className="w-full" loading={busy} disabled={!email || !password}>
               Sign in
             </Button>
           </form>
@@ -68,7 +89,8 @@ function PortalLogin({ onToken }: { onToken: (t: string) => void }) {
 
 function ActionCard({
   title,
-  icon: Icon,
+  icon,
+  tone,
   children,
   onSubmit,
   busy,
@@ -77,7 +99,8 @@ function ActionCard({
   error,
 }: {
   title: string;
-  icon: typeof Gift;
+  icon: LucideIcon;
+  tone: "blue" | "amber" | "violet";
   children: ReactNode;
   onSubmit: () => void;
   busy: boolean;
@@ -86,21 +109,22 @@ function ActionCard({
   error: string | null;
 }) {
   return (
-    <Card>
+    <Card className="h-full">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Icon className="h-4 w-4 text-amber-600" /> {title}
-        </CardTitle>
+        <div className="flex items-center gap-3">
+          <IconChip icon={icon} tone={tone} size="sm" />
+          <CardTitle>{title}</CardTitle>
+        </div>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="flex flex-1 flex-col gap-3">
         {children}
         {error && (
-          <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="flex items-start gap-2 rounded-xl border border-[#f8cfcf] bg-danger-soft px-3 py-2 text-sm text-[#a33131]">
+            <ShieldAlert className="mt-0.5 size-4 shrink-0" />
             {error}
           </div>
         )}
-        <Button className="w-full bg-amber-600 hover:bg-amber-700" onClick={onSubmit} loading={busy} disabled={disabled}>
+        <Button className="mt-auto w-full" onClick={onSubmit} loading={busy} disabled={disabled}>
           {cta}
         </Button>
       </CardContent>
@@ -160,55 +184,90 @@ function PortalDashboard({ token, onLogout }: { token: string; onLogout: () => v
     "Points transferred.",
   );
 
-  if (me.isLoading) return <LoadingBlock />;
+  if (me.isLoading) return <LoadingBlock label="Loading your account…" />;
   if (!me.data)
     return (
-      <div className="py-16 text-center text-sm text-slate-500">
+      <div className="py-16 text-center text-sm text-muted-foreground">
         Session expired.{" "}
-        <button className="text-amber-700 hover:underline" onClick={onLogout}>
+        <button className="cursor-pointer font-medium text-primary hover:underline" onClick={onLogout}>
           Sign in again
         </button>
       </div>
     );
   const a = me.data;
+  const series = balanceSeries(a.points, a.transactions);
+  const { earned, spent } = earnedRedeemed(a.transactions);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
-      <div className="overflow-hidden rounded-2xl bg-gradient-to-br from-amber-500 via-amber-600 to-orange-700 p-6 text-white shadow-lg">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-sm text-amber-100">Welcome back</p>
-            <h1 className="text-2xl font-semibold">{a.guest_name}</h1>
-            <p className="mt-1 font-mono text-sm text-amber-100">{a.id}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-sm text-amber-100">Points balance</p>
-            <p className="text-4xl font-bold tabular-nums">{a.points.toLocaleString("en-IN")}</p>
-            <div className="mt-1 inline-block rounded bg-white/90 px-1">
-              <TierBadge tier={a.tier} />
+    <div className="mx-auto max-w-6xl space-y-5">
+      <Reveal className="grid grid-cols-1 gap-5 lg:grid-cols-5">
+        <div className={cn("relative overflow-hidden rounded-3xl p-7 text-white shadow-lift lg:col-span-2", TIER_CARD[a.tier] ?? TIER_CARD.Silver)}>
+          <div className="absolute -top-12 -right-12 size-44 rounded-full bg-white/15" />
+          <div className="absolute -bottom-20 -left-10 size-52 rounded-full bg-white/10" />
+          <div className="relative flex items-start justify-between">
+            <div>
+              <p className="text-sm text-white/80">Welcome back</p>
+              <h1 className="text-2xl font-semibold">{a.guest_name}</h1>
             </div>
+            <Badge className="bg-white/20 text-white ring-white/30">{a.tier}</Badge>
           </div>
+          <p className="relative mt-10 text-sm text-white/80">Points balance</p>
+          <p className="relative text-5xl font-semibold">
+            <AnimatedNumber value={a.points} />
+          </p>
+          <div className="relative mt-6 flex flex-wrap items-center justify-between gap-2 text-sm text-white/85">
+            <span className="flex items-center gap-1.5">
+              <Mail className="size-4" /> {a.portal_email}
+            </span>
+            <span className="font-mono text-xs">{a.id}</span>
+          </div>
+          {a.contact_changed_at && <p className="relative mt-1 text-xs text-white/70">Contact changed {fmtDateTime(a.contact_changed_at)}</p>}
         </div>
-        <p className="mt-4 flex items-center gap-1.5 text-sm text-amber-50">
-          <Mail className="h-4 w-4" /> {a.portal_email}
-          {a.contact_changed_at && <span className="text-amber-200">· changed {fmtDateTime(a.contact_changed_at)}</span>}
-        </p>
-      </div>
+
+        <Card className="lg:col-span-3">
+          <CardHeader>
+            <div>
+              <CardTitle>Your points over time</CardTitle>
+              <CardDescription>Balance after each recent activity</CardDescription>
+            </div>
+            <div className="flex gap-4 text-xs">
+              <span className="text-ink-2">
+                Earned <span className="font-semibold text-success">+{earned.toLocaleString("en-IN")}</span>
+              </span>
+              <span className="text-ink-2">
+                Used <span className="font-semibold text-orange">−{spent.toLocaleString("en-IN")}</span>
+              </span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {a.transactions.length < 2 ? (
+              <p className="py-12 text-center text-sm text-muted-foreground">Your points history will appear here after your next activity.</p>
+            ) : (
+              <AreaTrend data={series} name="Points balance" series="blue" curve="stepAfter" height={220} />
+            )}
+          </CardContent>
+        </Card>
+      </Reveal>
 
       {a.frozen && (
-        <div className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
-          <Snowflake className="mt-0.5 h-4 w-4" />
+        <div className="flex items-start gap-3 rounded-2xl border border-[#f8cfcf] bg-danger-soft px-4 py-3 text-sm text-[#a33131]">
+          <Snowflake className="mt-0.5 size-4 shrink-0" />
           <span>
             <strong>Account frozen by security.</strong> {a.frozen_reason ?? ""} Redemptions and transfers are disabled.
           </span>
         </div>
       )}
-      {notice && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">{notice}</div>}
+      {notice && (
+        <div className="flex items-center gap-2 rounded-2xl border border-[#c7ecd9] bg-success-soft px-4 py-3 text-sm text-success">
+          <CircleCheck className="size-4" /> {notice}
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <Reveal delay={0.06} className="grid grid-cols-1 gap-5 md:grid-cols-3">
         <ActionCard
           title="Redeem points"
           icon={Gift}
+          tone="amber"
           onSubmit={() => redeem.mutate()}
           busy={redeem.isPending}
           disabled={!(Number(redeemPts) > 0)}
@@ -225,6 +284,7 @@ function PortalDashboard({ token, onLogout }: { token: string; onLogout: () => v
         <ActionCard
           title="Transfer points"
           icon={ArrowRightLeft}
+          tone="violet"
           onSubmit={() => transfer.mutate()}
           busy={transfer.isPending}
           disabled={!(Number(transferPts) > 0) || !toAccount.trim()}
@@ -241,6 +301,7 @@ function PortalDashboard({ token, onLogout }: { token: string; onLogout: () => v
         <ActionCard
           title="Change email"
           icon={Mail}
+          tone="blue"
           onSubmit={() => changeEmail.mutate()}
           busy={changeEmail.isPending}
           disabled={!newEmail.includes("@")}
@@ -251,36 +312,44 @@ function PortalDashboard({ token, onLogout }: { token: string; onLogout: () => v
             <Input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
           </Field>
         </ActionCard>
-      </div>
+      </Reveal>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent activity</CardTitle>
-        </CardHeader>
-        <Table>
-          <THead>
-            <tr>
-              <TH>When</TH>
-              <TH>Activity</TH>
-              <TH>Description</TH>
-              <TH className="text-right">Points</TH>
-            </tr>
-          </THead>
-          <TBody>
-            {a.transactions.map((t) => (
-              <TR key={t.id}>
-                <TD className="text-xs text-slate-500">{fmtDateTime(t.created_at)}</TD>
-                <TD className="capitalize">{t.kind.replace("_", " ")}</TD>
-                <TD>{t.description}</TD>
-                <TD className={`text-right font-medium tabular-nums ${t.points < 0 ? "text-red-600" : "text-emerald-700"}`}>
-                  {t.points > 0 ? "+" : ""}
-                  {t.points.toLocaleString("en-IN")}
-                </TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
-      </Card>
+      <Reveal delay={0.1}>
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>When</TableHead>
+                  <TableHead>Activity</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead className="text-right">Points</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {a.transactions.map((t) => (
+                  <TableRow key={t.id}>
+                    <TableCell className="text-xs text-ink-3">{fmtDateTime(t.created_at)}</TableCell>
+                    <TableCell>
+                      <Badge tone={t.points < 0 ? "orange" : "green"} className="capitalize">
+                        {t.kind.replace("_", " ")}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-ink">{t.description}</TableCell>
+                    <TableCell className={cn("text-right font-semibold tabular-nums", t.points < 0 ? "text-danger" : "text-success")}>
+                      {t.points > 0 ? "+" : ""}
+                      {t.points.toLocaleString("en-IN")}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </Reveal>
     </div>
   );
 }
@@ -293,31 +362,31 @@ export function PortalPage() {
     setTok(t);
   };
   return (
-    <div className="min-h-full bg-gradient-to-b from-amber-50 to-slate-50">
-      <header className="border-b border-amber-100 bg-white/80 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-5">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-600 text-sm font-bold text-white">A</div>
+    <div className="min-h-full bg-canvas">
+      <header className="sticky top-0 z-20 border-b border-border bg-white/85 backdrop-blur-md">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5">
+          <div className="flex items-center gap-3">
+            <div className="flex size-9 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#efa00b,#e0607e)] text-sm font-bold text-white">A</div>
             <div className="leading-tight">
-              <p className="text-sm font-semibold text-slate-900">Aranya Rewards</p>
-              <p className="text-[11px] text-slate-500">Member portal</p>
+              <GradientText colors={["#d98f06", "#e0607e", "#8b5cf6", "#e0607e"]} animationSpeed={10} className="text-base font-semibold">
+                Aranya Rewards
+              </GradientText>
+              <p className="text-[11px] text-ink-3">Member portal</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Link to="/login" className="text-xs text-slate-500 hover:text-slate-800">
+            <Link to="/login" className="text-xs text-ink-3 hover:text-ink">
               Staff login
             </Link>
             {token && (
-              <Button variant="ghost" size="sm" onClick={() => setToken(null)}>
-                <LogOut className="h-4 w-4" /> Sign out
+              <Button variant="outline" size="sm" onClick={() => setToken(null)}>
+                <LogOut /> Sign out
               </Button>
             )}
           </div>
         </div>
       </header>
-      <main className="px-5 py-8">
-        {token ? <PortalDashboard token={token} onLogout={() => setToken(null)} /> : <PortalLogin onToken={setToken} />}
-      </main>
+      <main className="px-5 py-8">{token ? <PortalDashboard token={token} onLogout={() => setToken(null)} /> : <PortalLogin onToken={setToken} />}</main>
     </div>
   );
 }

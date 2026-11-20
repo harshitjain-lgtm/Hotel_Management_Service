@@ -1,32 +1,20 @@
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
-import { Download, Search, X } from "lucide-react";
+import { Download, Eye, RotateCcw, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ChannelBadge, ReservationStatus, TierBadge } from "@/components/badges";
+import { EmptyState, Field, InitialsAvatar, LoadingBlock, Modal, PageHeader, Pagination, Reveal, SearchInput, SelectField } from "@/components/kit";
 import { useProperties } from "@/components/shared";
-import {
-  Button,
-  Card,
-  EmptyState,
-  Field,
-  Input,
-  LoadingBlock,
-  Modal,
-  PageHeader,
-  Pagination,
-  Select,
-  TBody,
-  TD,
-  TH,
-  THead,
-  TR,
-  Table,
-} from "@/components/ui";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/lib/toast";
 import type { Paged, ReservationRow } from "@/lib/types";
-import { downloadBlob, filenameFromDisposition, fmtDate, inr } from "@/lib/utils";
+import { cn, downloadBlob, filenameFromDisposition, fmtDate, inr, titleCase } from "@/lib/utils";
 
 interface Filters {
   property: string;
@@ -39,17 +27,43 @@ interface Filters {
 }
 
 const EMPTY: Filters = { property: "", status: "", channel: "", arrival_from: "", arrival_to: "", q: "", sort: "arrival_desc" };
+const KEYS = Object.keys(EMPTY) as (keyof Filters)[];
 
 const SORTS = [
-  ["arrival_desc", "Arrival (newest)"],
-  ["arrival_asc", "Arrival (oldest)"],
-  ["amount_desc", "Amount (highest)"],
-  ["created_desc", "Recently booked"],
-  ["loyalty_points_desc", "Loyalty points (highest)"],
+  { value: "arrival_desc", label: "Arrival (newest)" },
+  { value: "arrival_asc", label: "Arrival (oldest)" },
+  { value: "amount_desc", label: "Amount (highest)" },
+  { value: "created_desc", label: "Recently booked" },
+  { value: "loyalty_points_desc", label: "Loyalty points (highest)" },
+];
+
+const STATUS_TABS = [
+  { value: "", label: "All" },
+  { value: "booked", label: "Booked" },
+  { value: "checked_in", label: "Checked in" },
+  { value: "checked_out", label: "Checked out" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
+const CHANNEL_OPTIONS = [
+  { value: "", label: "Any channel" },
+  { value: "direct", label: "Direct" },
+  { value: "walk_in", label: "Walk-in" },
+  { value: "TRIPNEST", label: "TripNest" },
+  { value: "STAYFINDER", label: "StayFinder" },
 ];
 
 function clean(f: Filters) {
   return Object.fromEntries(Object.entries(f).filter(([, v]) => v !== "")) as Partial<Filters>;
+}
+
+function fromParams(params: URLSearchParams): Filters {
+  const f = { ...EMPTY };
+  for (const k of KEYS) {
+    const v = params.get(k);
+    if (v) f[k] = v;
+  }
+  return f;
 }
 
 function ExportDialog({ open, onClose, filters, total }: { open: boolean; onClose: () => void; filters: Filters; total: number }) {
@@ -80,11 +94,11 @@ function ExportDialog({ open, onClose, filters, total }: { open: boolean; onClos
       description="Exports use the current filters and sort order. Large exports may require step-up verification."
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
           <Button onClick={() => mutation.mutate()} loading={mutation.isPending}>
-            <Download className="h-4 w-4" /> Export {rows.toLocaleString("en-IN")} rows
+            <Download /> Export {rows.toLocaleString("en-IN")} rows
           </Button>
         </>
       }
@@ -99,22 +113,24 @@ function ExportDialog({ open, onClose, filters, total }: { open: boolean; onClos
 export function ReservationsPage() {
   const { can } = useAuth();
   const { data: properties } = useProperties();
-  const [draft, setDraft] = useState<Filters>(EMPTY);
-  const [filters, setFilters] = useState<Filters>(EMPTY);
+  const [params, setParams] = useSearchParams();
+  const [draft, setDraft] = useState<Filters>(() => fromParams(params));
+  const [filters, setFilters] = useState<Filters>(() => fromParams(params));
   const [page, setPage] = useState(1);
   const [exportOpen, setExportOpen] = useState(false);
   const pageSize = 25;
 
   const query = useQuery({
     queryKey: ["reservations", filters, page],
-    queryFn: () =>
-      api<Paged<ReservationRow>>("/reservations", { query: { ...clean(filters), page, page_size: pageSize } }),
+    queryFn: () => api<Paged<ReservationRow>>("/reservations", { query: { ...clean(filters), page, page_size: pageSize } }),
     placeholderData: keepPreviousData,
   });
 
   const apply = (next: Filters) => {
     setFilters(next);
     setPage(1);
+    const { sort, ...rest } = clean(next);
+    setParams({ ...rest, ...(sort && sort !== EMPTY.sort ? { sort } : {}) } as Record<string, string>, { replace: true });
   };
   const set = (key: keyof Filters, value: string) => setDraft((d) => ({ ...d, [key]: value }));
   const setAndApply = (key: keyof Filters, value: string) => {
@@ -122,168 +138,176 @@ export function ReservationsPage() {
     setDraft(next);
     apply(next);
   };
+  const dirty = KEYS.some((k) => filters[k] !== EMPTY[k]);
 
   return (
     <div>
       <PageHeader
         title="Reservations"
-        subtitle="Search bookings across your properties"
+        subtitle="Search bookings across the properties in your scope"
         actions={
           can("reservations.export") && (
-            <Button variant="secondary" onClick={() => setExportOpen(true)} disabled={!query.data}>
-              <Download className="h-4 w-4" /> Export CSV
+            <Button variant="outline-primary" onClick={() => setExportOpen(true)} disabled={!query.data}>
+              <Download /> Export CSV
             </Button>
           )
         }
       />
 
-      <Card className="mb-4">
-        <form
-          className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4 xl:grid-cols-8"
-          onSubmit={(e) => {
-            e.preventDefault();
-            apply(draft);
-          }}
-        >
-          <div className="col-span-2">
-            <label className="mb-1 block text-xs font-medium text-slate-600">Search</label>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-              <Input className="pl-8" value={draft.q} onChange={(e) => set("q", e.target.value)} placeholder="Guest, email, phone or STY-…" />
-            </div>
-          </div>
-          <Field label="Property">
-            <Select value={draft.property} onChange={(e) => setAndApply("property", e.target.value)}>
-              <option value="">All in scope</option>
-              {properties?.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.id} · {p.city}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Status">
-            <Select value={draft.status} onChange={(e) => setAndApply("status", e.target.value)}>
-              <option value="">Any</option>
-              <option value="booked">Booked</option>
-              <option value="checked_in">Checked in</option>
-              <option value="checked_out">Checked out</option>
-              <option value="cancelled">Cancelled</option>
-            </Select>
-          </Field>
-          <Field label="Channel">
-            <Select value={draft.channel} onChange={(e) => setAndApply("channel", e.target.value)}>
-              <option value="">Any</option>
-              <option value="direct">Direct</option>
-              <option value="walk_in">Walk-in</option>
-              <option value="TRIPNEST">TripNest</option>
-              <option value="STAYFINDER">StayFinder</option>
-            </Select>
-          </Field>
-          <Field label="Arrival from">
-            <Input type="date" value={draft.arrival_from} onChange={(e) => set("arrival_from", e.target.value)} />
-          </Field>
-          <Field label="Arrival to">
-            <Input type="date" value={draft.arrival_to} onChange={(e) => set("arrival_to", e.target.value)} />
-          </Field>
-          <Field label="Sort">
-            <Select value={draft.sort} onChange={(e) => setAndApply("sort", e.target.value)}>
-              {SORTS.map(([v, l]) => (
-                <option key={v} value={v}>
-                  {l}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <div className="col-span-2 flex items-end gap-2 md:col-span-4 xl:col-span-8">
-            <Button type="submit" size="sm">
-              <Search className="h-3.5 w-3.5" /> Apply
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setDraft(EMPTY);
-                apply(EMPTY);
+      <Reveal>
+        <Card className="mb-5">
+          <CardContent className="pt-5">
+            <form
+              className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-12"
+              onSubmit={(e) => {
+                e.preventDefault();
+                apply(draft);
               }}
             >
-              <X className="h-3.5 w-3.5" /> Reset
-            </Button>
-          </div>
-        </form>
-      </Card>
+              <SearchInput
+                className="sm:col-span-2 lg:col-span-4"
+                value={draft.q}
+                onChange={(e) => set("q", e.target.value)}
+                placeholder="Search guest, email, phone or STY-…"
+                aria-label="Search"
+              />
+              <div className="lg:col-span-2">
+                <SelectField
+                  aria-label="Property"
+                  value={draft.property}
+                  onChange={(v) => setAndApply("property", v)}
+                  options={[{ value: "", label: "All properties" }, ...(properties ?? []).map((p) => ({ value: p.id, label: `${p.id} · ${p.city}` }))]}
+                />
+              </div>
+              <div className="lg:col-span-2">
+                <SelectField aria-label="Channel" value={draft.channel} onChange={(v) => setAndApply("channel", v)} options={CHANNEL_OPTIONS} />
+              </div>
+              <div className="sm:col-span-2 lg:col-span-4">
+                <SelectField aria-label="Sort" value={draft.sort} onChange={(v) => setAndApply("sort", v)} options={SORTS} />
+              </div>
+              <div className="flex items-center gap-2 sm:col-span-2 lg:col-span-6">
+                <span className="shrink-0 text-xs text-ink-3">Arrival</span>
+                <Input type="date" aria-label="Arrival from" value={draft.arrival_from} onChange={(e) => set("arrival_from", e.target.value)} />
+                <span className="text-ink-3">→</span>
+                <Input type="date" aria-label="Arrival to" value={draft.arrival_to} onChange={(e) => set("arrival_to", e.target.value)} />
+              </div>
+              <div className="flex items-center justify-end gap-2 sm:col-span-2 lg:col-span-6">
+                {dirty && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      setDraft(EMPTY);
+                      apply(EMPTY);
+                    }}
+                  >
+                    <RotateCcw /> Reset
+                  </Button>
+                )}
+                <Button type="submit" className="h-10">
+                  <SlidersHorizontal /> Apply filters
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      </Reveal>
 
-      <Card>
-        {query.isLoading ? (
-          <LoadingBlock />
-        ) : !query.data || query.data.items.length === 0 ? (
-          <EmptyState title="No reservations found" description="Try adjusting the filters." />
-        ) : (
-          <>
-            <Table>
-              <THead>
-                <tr>
-                  <TH>Reservation</TH>
-                  <TH>Guest</TH>
-                  <TH>Contact</TH>
-                  <TH>Property</TH>
-                  <TH>Stay</TH>
-                  <TH>Room</TH>
-                  <TH>Channel</TH>
-                  <TH>Status</TH>
-                  <TH className="text-right">Amount</TH>
-                </tr>
-              </THead>
-              <TBody>
-                {query.data.items.map((r) => (
-                  <TR key={r.id}>
-                    <TD>
-                      <Link to={`/reservations/${r.id}`} className="font-mono text-[13px] font-medium text-indigo-600 hover:underline">
-                        {r.id}
-                      </Link>
-                    </TD>
-                    <TD>
-                      <Link to={`/guests/${r.guest.id}`} className="font-medium text-slate-900 hover:underline">
-                        {r.guest.name}
-                      </Link>
-                      <div className="mt-0.5 flex items-center gap-1">
-                        <span className="text-xs text-slate-500">{r.guest.nationality}</span>
-                        {r.guest.loyalty && <TierBadge tier={r.guest.loyalty.tier} points={r.guest.loyalty.points} />}
-                      </div>
-                    </TD>
-                    <TD className="text-xs text-slate-500">
-                      <div className="font-mono">{r.guest.phone}</div>
-                      <div className="max-w-[180px] truncate">{r.guest.email}</div>
-                    </TD>
-                    <TD className="font-medium">{r.property_id}</TD>
-                    <TD className="whitespace-nowrap">
-                      {fmtDate(r.arrival)} → {fmtDate(r.departure)}
-                      <div className="text-xs text-slate-500">{r.nights} night{r.nights > 1 ? "s" : ""}</div>
-                    </TD>
-                    <TD className="capitalize">
-                      {r.room_type}
-                      {r.room_no && <span className="ml-1 text-xs text-slate-500">#{r.room_no}</span>}
-                    </TD>
-                    <TD>
-                      <ChannelBadge channel={r.channel} />
-                    </TD>
-                    <TD>
-                      <ReservationStatus status={r.status} />
-                    </TD>
-                    <TD className="text-right font-medium tabular-nums">{inr(r.total_amount)}</TD>
-                  </TR>
+      <Reveal delay={0.06}>
+        <Card>
+          <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-5 pb-4">
+            <Tabs value={filters.status || "all"} onValueChange={(v) => setAndApply("status", v === "all" ? "" : v)}>
+              <TabsList variant="pill" className="flex-wrap">
+                {STATUS_TABS.map((t) => (
+                  <TabsTrigger key={t.value || "all"} value={t.value || "all"}>
+                    {t.label}
+                  </TabsTrigger>
                 ))}
-              </TBody>
-            </Table>
-            <Pagination page={page} pageSize={pageSize} total={query.data.total} onPage={setPage} />
-          </>
-        )}
-      </Card>
+              </TabsList>
+            </Tabs>
+            {query.data && (
+              <p className="text-sm text-muted-foreground">
+                <span className="font-semibold text-ink">{query.data.total.toLocaleString("en-IN")}</span> reservations
+              </p>
+            )}
+          </div>
+          {query.isLoading ? (
+            <LoadingBlock rows={8} />
+          ) : !query.data || query.data.items.length === 0 ? (
+            <EmptyState title="No reservations found" description="Try adjusting the filters." />
+          ) : (
+            <div className={cn("px-5 transition-opacity", query.isFetching && "opacity-60")}>
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>Guest</TableHead>
+                    <TableHead>Reservation</TableHead>
+                    <TableHead>Stay</TableHead>
+                    <TableHead>Room</TableHead>
+                    <TableHead>Channel</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {query.data.items.map((r) => (
+                    <TableRow key={r.id}>
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <InitialsAvatar name={r.guest.name} />
+                          <div className="min-w-0 leading-tight">
+                            <Link to={`/guests/${r.guest.id}`} className="block max-w-[200px] truncate font-medium text-ink hover:text-primary">
+                              {r.guest.name}
+                            </Link>
+                            <div className="mt-0.5 flex items-center gap-1.5">
+                              <span className="text-xs text-ink-3">{r.guest.phone}</span>
+                              {r.guest.loyalty && <TierBadge tier={r.guest.loyalty.tier} />}
+                            </div>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <Link to={`/reservations/${r.id}`} className="font-mono text-xs font-medium text-primary hover:underline">
+                          {r.id}
+                        </Link>
+                        <div className="mt-0.5 text-xs text-ink-3">{r.property_id}</div>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {fmtDate(r.arrival)} → {fmtDate(r.departure)}
+                        <div className="text-xs text-ink-3">
+                          {r.nights} night{r.nights > 1 ? "s" : ""} · {r.adults + r.children} guest{r.adults + r.children > 1 ? "s" : ""}
+                        </div>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {titleCase(r.room_type)}
+                        {r.room_no && <span className="ml-1 text-xs text-ink-3">#{r.room_no}</span>}
+                      </TableCell>
+                      <TableCell>
+                        <ChannelBadge channel={r.channel} />
+                      </TableCell>
+                      <TableCell>
+                        <ReservationStatus status={r.status} />
+                      </TableCell>
+                      <TableCell className="text-right font-medium text-ink tabular-nums">{inr(r.total_amount)}</TableCell>
+                      <TableCell className="text-right">
+                        <Button asChild variant="outline-primary" size="icon-sm" className="rounded-full">
+                          <Link to={`/reservations/${r.id}`} aria-label={`Open ${r.id}`}>
+                            <Eye />
+                          </Link>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          {query.data && query.data.total > 0 && <Pagination page={page} pageSize={pageSize} total={query.data.total} onPage={setPage} />}
+        </Card>
+      </Reveal>
 
-      {exportOpen && query.data && (
-        <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} filters={filters} total={query.data.total} />
-      )}
+      {exportOpen && query.data && <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} filters={filters} total={query.data.total} />}
     </div>
   );
 }

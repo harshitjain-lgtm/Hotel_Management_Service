@@ -1,26 +1,21 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { ChevronRight, Search } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { TierBadge } from "@/components/badges";
-import {
-  Button,
-  Card,
-  EmptyState,
-  Input,
-  LoadingBlock,
-  PageHeader,
-  Pagination,
-  Select,
-  TBody,
-  TD,
-  TH,
-  THead,
-  TR,
-  Table,
-} from "@/components/ui";
+import { EmptyState, InitialsAvatar, LoadingBlock, PageHeader, Pagination, Reveal, SearchInput, SelectField } from "@/components/kit";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import type { GuestBrief, Paged } from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+const SORTS = [
+  { value: "name_asc", label: "Name (A–Z)" },
+  { value: "created_desc", label: "Recently created" },
+  { value: "loyalty_points_desc", label: "Loyalty points (highest)" },
+];
 
 export function GuestsPage() {
   const [q, setQ] = useState("");
@@ -38,80 +33,90 @@ export function GuestsPage() {
   return (
     <div>
       <PageHeader title="Guests" subtitle="Guest profiles with stays at properties in your scope" />
-      <Card className="mb-4">
-        <form
-          className="flex flex-wrap items-end gap-3 p-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setApplied(q);
-            setPage(1);
-          }}
-        >
-          <div className="min-w-[280px] flex-1">
-            <label className="mb-1 block text-xs font-medium text-slate-600">Search</label>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-              <Input className="pl-8" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, email, phone, guest or loyalty ID" />
-            </div>
-          </div>
-          <div className="w-56">
-            <label className="mb-1 block text-xs font-medium text-slate-600">Sort</label>
-            <Select
-              value={sort}
-              onChange={(e) => {
-                setSort(e.target.value);
+      <Reveal>
+        <Card className="mb-5">
+          <CardContent className="pt-5">
+            <form
+              className="flex flex-col gap-3 sm:flex-row"
+              onSubmit={(e) => {
+                e.preventDefault();
+                setApplied(q);
                 setPage(1);
               }}
             >
-              <option value="name_asc">Name (A–Z)</option>
-              <option value="created_desc">Recently created</option>
-              <option value="loyalty_points_desc">Loyalty points (highest)</option>
-            </Select>
-          </div>
-          <Button type="submit" size="sm" className="h-9">
-            Search
-          </Button>
-        </form>
-      </Card>
-      <Card>
-        {query.isLoading ? (
-          <LoadingBlock />
-        ) : !query.data || query.data.items.length === 0 ? (
-          <EmptyState title="No guests found" />
-        ) : (
-          <>
-            <Table>
-              <THead>
-                <tr>
-                  <TH>Guest ID</TH>
-                  <TH>Name</TH>
-                  <TH>Phone</TH>
-                  <TH>Email</TH>
-                  <TH>Nationality</TH>
-                  <TH>Loyalty</TH>
-                </tr>
-              </THead>
-              <TBody>
-                {query.data.items.map((g) => (
-                  <TR key={g.id}>
-                    <TD>
-                      <Link to={`/guests/${g.id}`} className="font-mono text-[13px] font-medium text-indigo-600 hover:underline">
-                        {g.id}
-                      </Link>
-                    </TD>
-                    <TD className="font-medium text-slate-900">{g.name}</TD>
-                    <TD className="font-mono text-xs">{g.phone}</TD>
-                    <TD className="text-xs">{g.email}</TD>
-                    <TD>{g.nationality}</TD>
-                    <TD>{g.loyalty ? <TierBadge tier={g.loyalty.tier} points={g.loyalty.points} /> : <span className="text-slate-400">—</span>}</TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-            <Pagination page={page} pageSize={pageSize} total={query.data.total} onPage={setPage} />
-          </>
-        )}
-      </Card>
+              <SearchInput className="flex-1" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, email, phone, guest or loyalty ID" aria-label="Search guests" />
+              <div className="sm:w-60">
+                <SelectField
+                  aria-label="Sort"
+                  value={sort}
+                  onChange={(v) => {
+                    setSort(v);
+                    setPage(1);
+                  }}
+                  options={SORTS}
+                />
+              </div>
+              <Button type="submit" className="h-10">
+                <Search /> Search
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </Reveal>
+      <Reveal delay={0.06}>
+        <Card>
+          {query.isLoading ? (
+            <LoadingBlock rows={8} />
+          ) : !query.data || query.data.items.length === 0 ? (
+            <EmptyState title="No guests found" description="Try a different name, phone number or ID." />
+          ) : (
+            <>
+              <div className={cn("px-5 pt-5 transition-opacity", query.isFetching && "opacity-60")}>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>Guest</TableHead>
+                      <TableHead>Guest ID</TableHead>
+                      <TableHead>Phone</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Nationality</TableHead>
+                      <TableHead>Loyalty</TableHead>
+                      <TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {query.data.items.map((g) => (
+                      <TableRow key={g.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <InitialsAvatar name={g.name} />
+                            <Link to={`/guests/${g.id}`} className="font-medium text-ink hover:text-primary">
+                              {g.name}
+                            </Link>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{g.id}</TableCell>
+                        <TableCell className="font-mono text-xs">{g.phone}</TableCell>
+                        <TableCell className="max-w-[220px] truncate text-xs">{g.email}</TableCell>
+                        <TableCell>{g.nationality}</TableCell>
+                        <TableCell>{g.loyalty ? <TierBadge tier={g.loyalty.tier} points={g.loyalty.points} /> : <span className="text-ink-3">—</span>}</TableCell>
+                        <TableCell className="text-right">
+                          <Button asChild variant="ghost" size="icon-sm" className="rounded-full">
+                            <Link to={`/guests/${g.id}`} aria-label={`Open ${g.name}`}>
+                              <ChevronRight />
+                            </Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <Pagination page={page} pageSize={pageSize} total={query.data.total} onPage={setPage} />
+            </>
+          )}
+        </Card>
+      </Reveal>
     </div>
   );
 }

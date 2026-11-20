@@ -1,32 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Gift, SlidersHorizontal, Snowflake } from "lucide-react";
+import { ArrowDownRight, ArrowLeft, ArrowUpRight, Gift, Mail, SlidersHorizontal, Snowflake } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { TierBadge } from "@/components/badges";
-import {
-  Badge,
-  Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  Field,
-  Input,
-  KeyValue,
-  LoadingBlock,
-  Modal,
-  TBody,
-  TD,
-  TH,
-  THead,
-  TR,
-  Table,
-} from "@/components/ui";
+import { AnimatedNumber, AreaTrend, StatTile } from "@/components/charts";
+import { EmptyState, Field, IconChip, KeyValue, LoadingBlock, Modal, Reveal } from "@/components/kit";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { balanceSeries, earnedRedeemed } from "@/lib/loyalty";
 import { toast } from "@/lib/toast";
 import type { LoyaltyAccountDetail } from "@/lib/types";
-import { fmtDateTime } from "@/lib/utils";
+import { cn, fmtDateTime } from "@/lib/utils";
+
+const TIER_CARD: Record<string, string> = {
+  Platinum: "bg-[linear-gradient(135deg,#5c63c7,#8b5cf6_60%,#b794f6)]",
+  Gold: "bg-[linear-gradient(135deg,#d98f06,#efa00b_55%,#f6c453)]",
+  Silver: "bg-[linear-gradient(135deg,#64748b,#8a96a8_60%,#b8c2d0)]",
+};
 
 export function LoyaltyDetailPage() {
   const { id = "" } = useParams();
@@ -56,41 +51,38 @@ export function LoyaltyDetailPage() {
     setModal(m);
   };
 
-  if (query.isLoading) return <LoadingBlock />;
-  if (!query.data)
-    return (
-      <div className="py-16 text-center text-sm text-slate-500">
-        Account unavailable. <Link to="/loyalty" className="text-indigo-600 hover:underline">Back</Link>
-      </div>
-    );
+  if (query.isLoading) return <LoadingBlock label="Loading account…" />;
+  if (!query.data) return <EmptyState title="Account unavailable" description="This loyalty account could not be loaded." />;
   const a = query.data;
   const valid = modal === "adjust" ? Number(points) !== 0 && text.trim().length >= 3 : Number(points) > 0;
+  const series = balanceSeries(a.points, a.transactions);
+  const { earned, spent } = earnedRedeemed(a.transactions);
 
   return (
     <div className="space-y-5">
       <div>
-        <Link to="/loyalty" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800">
-          <ArrowLeft className="h-4 w-4" /> Loyalty
+        <Link to="/loyalty" className="inline-flex items-center gap-1.5 text-sm text-ink-2 transition-colors hover:text-primary">
+          <ArrowLeft className="size-4" /> Loyalty
         </Link>
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <h1 className="font-mono text-xl font-semibold text-slate-900">{a.id}</h1>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="font-mono text-2xl font-semibold tracking-tight text-ink">{a.id}</h1>
             <TierBadge tier={a.tier} />
             {a.frozen && (
-              <Badge color="red">
-                <Snowflake className="h-3 w-3" /> Frozen
+              <Badge tone="red">
+                <Snowflake /> Frozen
               </Badge>
             )}
           </div>
           <div className="flex gap-2">
             {can("loyalty.adjust") && (
-              <Button variant="secondary" onClick={() => open("adjust")}>
-                <SlidersHorizontal className="h-4 w-4" /> Adjust points
+              <Button variant="outline-primary" onClick={() => open("adjust")}>
+                <SlidersHorizontal /> Adjust points
               </Button>
             )}
             {can("loyalty.redeem") && (
               <Button onClick={() => open("redeem")}>
-                <Gift className="h-4 w-4" /> Redeem
+                <Gift /> Redeem
               </Button>
             )}
           </div>
@@ -98,64 +90,124 @@ export function LoyaltyDetailPage() {
       </div>
 
       {a.frozen && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          <strong>Account frozen by security.</strong> {a.frozen_reason}
+        <div className="flex items-start gap-3 rounded-2xl border border-[#f8cfcf] bg-danger-soft px-4 py-3 text-sm text-[#a33131]">
+          <Snowflake className="mt-0.5 size-4 shrink-0" />
+          <span>
+            <strong>Account frozen by security.</strong> {a.frozen_reason}
+          </span>
         </div>
       )}
 
-      <Card>
-        <CardContent>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 md:grid-cols-5">
-            <KeyValue label="Member">
-              <Link to={`/guests/${a.guest_id}`} className="text-indigo-600 hover:underline">
-                {a.guest_name}
-              </Link>
-            </KeyValue>
-            <KeyValue label="Balance">
-              <span className="text-lg font-semibold tabular-nums">{a.points.toLocaleString("en-IN")}</span> pts
-            </KeyValue>
-            <KeyValue label="Portal email">{a.portal_email}</KeyValue>
-            <KeyValue label="Contact changed">{fmtDateTime(a.contact_changed_at)}</KeyValue>
-            <KeyValue label="Guest ID" mono>
-              {a.guest_id}
-            </KeyValue>
-          </dl>
-        </CardContent>
-      </Card>
+      <Reveal className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+        <div className={cn("relative overflow-hidden rounded-2xl p-6 text-white shadow-lift", TIER_CARD[a.tier] ?? TIER_CARD.Silver)}>
+          <div className="absolute -top-10 -right-10 size-40 rounded-full bg-white/15" />
+          <div className="absolute -bottom-16 -left-8 size-44 rounded-full bg-white/10" />
+          <div className="relative flex items-start justify-between">
+            <div>
+              <p className="text-xs tracking-[0.18em] text-white/80 uppercase">Aranya Rewards</p>
+              <p className="mt-0.5 text-lg font-semibold">{a.tier} member</p>
+            </div>
+            <Gift className="size-6 text-white/80" />
+          </div>
+          <p className="relative mt-8 text-xs text-white/80">Points balance</p>
+          <p className="relative text-4xl font-semibold">
+            <AnimatedNumber value={a.points} />
+          </p>
+          <div className="relative mt-6 flex items-end justify-between gap-3 text-sm">
+            <Link to={`/guests/${a.guest_id}`} className="font-medium hover:underline">
+              {a.guest_name}
+            </Link>
+            <span className="font-mono text-xs text-white/80">{a.id}</span>
+          </div>
+        </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Transactions</CardTitle>
-        </CardHeader>
-        <Table>
-          <THead>
-            <tr>
-              <TH>When</TH>
-              <TH>Type</TH>
-              <TH>Description</TH>
-              <TH>Performed by</TH>
-              <TH className="text-right">Points</TH>
-            </tr>
-          </THead>
-          <TBody>
-            {a.transactions.map((t) => (
-              <TR key={t.id}>
-                <TD className="text-xs text-slate-500">{fmtDateTime(t.created_at)}</TD>
-                <TD className="capitalize">{t.kind.replace("_", " ")}</TD>
-                <TD>{t.description}</TD>
-                <TD className="text-xs">
-                  {t.performed_by_type}
-                  {t.performed_by ? ` · ${t.performed_by}` : ""}
-                </TD>
-                <TD className={`text-right font-medium tabular-nums ${t.points < 0 ? "text-red-600" : "text-emerald-700"}`}>
-                  {t.points > 0 ? "+" : ""}
-                  {t.points.toLocaleString("en-IN")}
-                </TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
-      </Card>
+        <Card className="xl:col-span-2">
+          <CardContent className="grid h-full grid-cols-1 content-center gap-6 py-6 sm:grid-cols-3 sm:gap-0 sm:divide-x sm:divide-border">
+            <StatTile className="sm:pr-5" icon={<IconChip icon={ArrowUpRight} tone="green" />} label="Earned" hint="recent" value={earned} />
+            <StatTile className="sm:px-5" icon={<IconChip icon={ArrowDownRight} tone="orange" />} label="Redeemed" hint="recent" value={spent} />
+            <StatTile
+              className="sm:pl-5"
+              icon={<IconChip icon={Mail} tone="blue" />}
+              label="Transactions"
+              hint="shown"
+              value={a.transactions.length}
+              footer={<>Contact changed {fmtDateTime(a.contact_changed_at)}</>}
+            />
+          </CardContent>
+        </Card>
+      </Reveal>
+
+      {a.transactions.length >= 2 && (
+        <Reveal delay={0.06}>
+          <Card>
+            <CardHeader>
+              <div>
+                <CardTitle>Points balance</CardTitle>
+                <CardDescription>
+                  Balance after each of the last {a.transactions.length} transaction{a.transactions.length === 1 ? "" : "s"}
+                </CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <AreaTrend data={series} name="Points balance" series="blue" curve="stepAfter" height={250} />
+            </CardContent>
+          </Card>
+        </Reveal>
+      )}
+
+      <Reveal delay={0.1}>
+        <Card>
+          <CardHeader>
+            <CardTitle>Transactions</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="mb-5 grid grid-cols-2 gap-4 md:grid-cols-4">
+              <KeyValue label="Member">
+                <Link to={`/guests/${a.guest_id}`} className="text-primary hover:underline">
+                  {a.guest_name}
+                </Link>
+              </KeyValue>
+              <KeyValue label="Guest ID" mono>
+                {a.guest_id}
+              </KeyValue>
+              <KeyValue label="Portal email">{a.portal_email}</KeyValue>
+              <KeyValue label="Status">{a.frozen ? "Frozen" : "Active"}</KeyValue>
+            </dl>
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>When</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Performed by</TableHead>
+                  <TableHead className="text-right">Points</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {a.transactions.map((t) => (
+                  <TableRow key={t.id}>
+                    <TableCell className="text-xs text-ink-3">{fmtDateTime(t.created_at)}</TableCell>
+                    <TableCell>
+                      <Badge tone={t.points < 0 ? "orange" : "green"} className="capitalize">
+                        {t.kind.replace("_", " ")}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-ink">{t.description}</TableCell>
+                    <TableCell className="text-xs">
+                      {t.performed_by_type}
+                      {t.performed_by ? ` · ${t.performed_by}` : ""}
+                    </TableCell>
+                    <TableCell className={cn("text-right font-semibold tabular-nums", t.points < 0 ? "text-danger" : "text-success")}>
+                      {t.points > 0 ? "+" : ""}
+                      {t.points.toLocaleString("en-IN")}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </Reveal>
 
       <Modal
         open={modal !== null}
@@ -164,7 +216,7 @@ export function LoyaltyDetailPage() {
         description={modal === "adjust" ? "Use a negative number to deduct points. Manual adjustments are monitored." : `Available: ${a.points.toLocaleString("en-IN")} pts`}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setModal(null)}>
+            <Button variant="outline" onClick={() => setModal(null)}>
               Cancel
             </Button>
             <Button onClick={() => mutation.mutate()} loading={mutation.isPending} disabled={!valid}>

@@ -1,47 +1,205 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource/poppins/300.css";
+@import "@fontsource/poppins/400.css";
+@import "@fontsource/poppins/500.css";
+@import "@fontsource/poppins/600.css";
+@import "@fontsource/poppins/700.css";
 
-@theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+/*
+ * StayDesk light theme.
+ * Palette taken from the reference dashboard: a pale-blue canvas, white cards, a single
+ * saturated blue for primary actions, and amber / green / periwinkle as the chart accents.
+ * The four chart hues were run through the dataviz palette validator (light mode):
+ * lightness band, chroma floor, CVD separation and normal-vision floor all pass.
+ */
+
+@theme inline {
+  --font-sans: "Poppins", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-heading: "Poppins", ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-canvas: var(--canvas);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-strong: var(--primary-strong);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-violet: var(--violet);
+  --color-violet-soft: var(--violet-soft);
+  --color-orange: var(--orange);
+  --color-orange-soft: var(--orange-soft);
+  --color-gold: var(--gold);
+  --color-gold-soft: var(--gold-soft);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-grid: var(--chart-grid);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+
+  --shadow-card: 0 1px 2px rgb(16 42 84 / 0.04), 0 4px 16px -6px rgb(16 42 84 / 0.08);
+  --shadow-lift: 0 2px 4px rgb(16 42 84 / 0.05), 0 12px 28px -10px rgb(16 42 84 / 0.18);
 }
 
-html,
-body,
-#root {
-  height: 100%;
+:root {
+  color-scheme: light;
+  --radius: 0.75rem;
+
+  /* surfaces */
+  --canvas: #f1f6fc;
+  --background: #f1f6fc;
+  --card: #ffffff;
+  --popover: #ffffff;
+
+  /* ink */
+  --ink: #1d2939;
+  --ink-2: #475467;
+  --ink-3: #8a96a8;
+  --foreground: var(--ink);
+  --card-foreground: var(--ink);
+  --popover-foreground: var(--ink);
+  --muted: #f4f7fb;
+  --muted-foreground: #6b7a90;
+
+  /* brand */
+  --primary: #1e88e5;
+  --primary-strong: #1570c4;
+  --primary-soft: #e3f0fd;
+  --primary-foreground: #ffffff;
+  --secondary: #eef5fd;
+  --secondary-foreground: #1570c4;
+  --accent: #eaf3fd;
+  --accent-foreground: #1570c4;
+
+  /* status + accents (soft = tinted background for pills and icon chips) */
+  --success: #17915c;
+  --success-soft: #e2f6ec;
+  --warning: #c27803;
+  --warning-soft: #fff4dc;
+  --danger: #e04848;
+  --danger-soft: #fdecec;
+  --destructive: #e04848;
+  --violet: #5c63c7;
+  --violet-soft: #ecedfb;
+  --orange: #f08a24;
+  --orange-soft: #fff0e0;
+  --gold: #efa00b;
+  --gold-soft: #fff6e0;
+
+  /* lines */
+  --border: #e3ebf5;
+  --input: #d9e3ef;
+  --ring: #1e88e5;
+
+  /* charts: validated categorical order (blue, amber, green, periwinkle) */
+  --chart-1: #1e88e5;
+  --chart-2: #efa00b;
+  --chart-3: #1a9a63;
+  --chart-4: #737bd3;
+  --chart-5: #a3b1c4;
+  --chart-grid: #edf2f8;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #475467;
+  --sidebar-primary: #1e88e5;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e8f2fd;
+  --sidebar-accent-foreground: #1570c4;
+  --sidebar-border: #e8eef6;
+  --sidebar-ring: #1e88e5;
 }
 
-body {
-  @apply bg-slate-50 text-slate-900 antialiased;
-}
-
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-canvas text-ink antialiased;
+    font-feature-settings: "liga" 1;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 20%, transparent);
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #cfdbe9 transparent;
   }
 }
 
 @keyframes pulse-ring {
   0% {
-    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.45);
+    box-shadow: 0 0 0 0 rgba(224, 72, 72, 0.45);
   }
   70% {
-    box-shadow: 0 0 0 14px rgba(220, 38, 38, 0);
+    box-shadow: 0 0 0 14px rgba(224, 72, 72, 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0);
+    box-shadow: 0 0 0 0 rgba(224, 72, 72, 0);
   }
-}
-
-.animate-toast-in {
-  animation: toast-in 160ms ease-out;
 }
 
 .animate-pulse-ring {
   animation: pulse-ring 1.8s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-ring {
+    animation: none;
+  }
 }

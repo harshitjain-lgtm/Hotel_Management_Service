@@ -48,6 +48,9 @@ with sync_playwright() as p:
 
     page.get_by_placeholder("••••••").fill(pyotp.TOTP(staff["admin_01"]["mfa_secret"]).now())
     page.locator('button[type="submit"]').click()
+    # Staff with reservations.read land on the dashboard; open the reservations list explicitly.
+    page.wait_for_url(re.compile(r"/(dashboard|reservations)"), timeout=20000)
+    page.goto(URL + "/reservations", wait_until="networkidle")
     page.wait_for_selector("table tbody tr", timeout=20000)
     rows = page.locator("table tbody tr").count()
     check(rows > 0, "logged in and reservations table loaded", f"{rows} rows, url={page.url.replace(URL, '')}")

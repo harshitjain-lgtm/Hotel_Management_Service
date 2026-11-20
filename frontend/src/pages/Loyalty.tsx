@@ -1,28 +1,22 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Search, Snowflake } from "lucide-react";
+import { ChevronRight, Search, Snowflake } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { TierBadge } from "@/components/badges";
-import {
-  Badge,
-  Button,
-  Card,
-  EmptyState,
-  Input,
-  LoadingBlock,
-  PageHeader,
-  Pagination,
-  Select,
-  TBody,
-  TD,
-  TH,
-  THead,
-  TR,
-  Table,
-} from "@/components/ui";
+import { EmptyState, InitialsAvatar, LoadingBlock, PageHeader, Pagination, Reveal, SearchInput, SelectField } from "@/components/kit";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import type { LoyaltyAccountView, Paged } from "@/lib/types";
-import { fmtDateTime } from "@/lib/utils";
+import { cn, fmtDateTime } from "@/lib/utils";
+
+const SORTS = [
+  { value: "points_desc", label: "Points (highest)" },
+  { value: "name_asc", label: "Name (A–Z)" },
+  { value: "created_desc", label: "Recently enrolled" },
+];
 
 export function LoyaltyPage() {
   const [q, setQ] = useState("");
@@ -40,96 +34,106 @@ export function LoyaltyPage() {
   return (
     <div>
       <PageHeader title="Aranya Rewards" subtitle="Loyalty accounts, balances and activity" />
-      <Card className="mb-4">
-        <form
-          className="flex flex-wrap items-end gap-3 p-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setApplied(q);
-            setPage(1);
-          }}
-        >
-          <div className="min-w-[280px] flex-1">
-            <label className="mb-1 block text-xs font-medium text-slate-600">Search</label>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-              <Input className="pl-8" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Member name, email or AR… ID" />
-            </div>
-          </div>
-          <div className="w-56">
-            <label className="mb-1 block text-xs font-medium text-slate-600">Sort</label>
-            <Select
-              value={sort}
-              onChange={(e) => {
-                setSort(e.target.value);
+      <Reveal>
+        <Card className="mb-5">
+          <CardContent className="pt-5">
+            <form
+              className="flex flex-col gap-3 sm:flex-row"
+              onSubmit={(e) => {
+                e.preventDefault();
+                setApplied(q);
                 setPage(1);
               }}
             >
-              <option value="points_desc">Points (highest)</option>
-              <option value="name_asc">Name (A–Z)</option>
-              <option value="created_desc">Recently enrolled</option>
-            </Select>
-          </div>
-          <Button type="submit" size="sm" className="h-9">
-            Search
-          </Button>
-        </form>
-      </Card>
-      <Card>
-        {query.isLoading ? (
-          <LoadingBlock />
-        ) : !query.data || query.data.items.length === 0 ? (
-          <EmptyState title="No loyalty accounts found" />
-        ) : (
-          <>
-            <Table>
-              <THead>
-                <tr>
-                  <TH>Account</TH>
-                  <TH>Member</TH>
-                  <TH>Portal email</TH>
-                  <TH>Tier</TH>
-                  <TH className="text-right">Points</TH>
-                  <TH>Contact changed</TH>
-                  <TH>Status</TH>
-                </tr>
-              </THead>
-              <TBody>
-                {query.data.items.map((a) => (
-                  <TR key={a.id}>
-                    <TD>
-                      <Link to={`/loyalty/${a.id}`} className="font-mono text-[13px] font-medium text-indigo-600 hover:underline">
-                        {a.id}
-                      </Link>
-                    </TD>
-                    <TD>
-                      <Link to={`/guests/${a.guest_id}`} className="font-medium text-slate-900 hover:underline">
-                        {a.guest_name}
-                      </Link>
-                    </TD>
-                    <TD className="text-xs">{a.portal_email}</TD>
-                    <TD>
-                      <TierBadge tier={a.tier} />
-                    </TD>
-                    <TD className="text-right font-medium tabular-nums">{a.points.toLocaleString("en-IN")}</TD>
-                    <TD className="text-xs text-slate-500">{fmtDateTime(a.contact_changed_at)}</TD>
-                    <TD>
-                      {a.frozen ? (
-                        <Badge color="red">
-                          <Snowflake className="h-3 w-3" /> Frozen
-                        </Badge>
-                      ) : (
-                        <Badge color="green">Active</Badge>
-                      )}
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-            <Pagination page={page} pageSize={pageSize} total={query.data.total} onPage={setPage} />
-          </>
-        )}
-      </Card>
+              <SearchInput className="flex-1" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Member name, email or AR… ID" aria-label="Search members" />
+              <div className="sm:w-60">
+                <SelectField
+                  aria-label="Sort"
+                  value={sort}
+                  onChange={(v) => {
+                    setSort(v);
+                    setPage(1);
+                  }}
+                  options={SORTS}
+                />
+              </div>
+              <Button type="submit" className="h-10">
+                <Search /> Search
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </Reveal>
+      <Reveal delay={0.06}>
+        <Card>
+          {query.isLoading ? (
+            <LoadingBlock rows={8} />
+          ) : !query.data || query.data.items.length === 0 ? (
+            <EmptyState title="No loyalty accounts found" />
+          ) : (
+            <>
+              <div className={cn("px-5 pt-5 transition-opacity", query.isFetching && "opacity-60")}>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>Member</TableHead>
+                      <TableHead>Account</TableHead>
+                      <TableHead>Portal email</TableHead>
+                      <TableHead>Tier</TableHead>
+                      <TableHead className="text-right">Points</TableHead>
+                      <TableHead>Contact changed</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {query.data.items.map((a) => (
+                      <TableRow key={a.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <InitialsAvatar name={a.guest_name} />
+                            <Link to={`/guests/${a.guest_id}`} className="font-medium text-ink hover:text-primary">
+                              {a.guest_name}
+                            </Link>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Link to={`/loyalty/${a.id}`} className="font-mono text-xs font-medium text-primary hover:underline">
+                            {a.id}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="max-w-[220px] truncate text-xs">{a.portal_email}</TableCell>
+                        <TableCell>
+                          <TierBadge tier={a.tier} />
+                        </TableCell>
+                        <TableCell className="text-right font-semibold text-ink tabular-nums">{a.points.toLocaleString("en-IN")}</TableCell>
+                        <TableCell className="text-xs text-ink-3">{fmtDateTime(a.contact_changed_at)}</TableCell>
+                        <TableCell>
+                          {a.frozen ? (
+                            <Badge tone="red">
+                              <Snowflake /> Frozen
+                            </Badge>
+                          ) : (
+                            <Badge tone="green">Active</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button asChild variant="ghost" size="icon-sm" className="rounded-full">
+                            <Link to={`/loyalty/${a.id}`} aria-label={`Open ${a.id}`}>
+                              <ChevronRight />
+                            </Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <Pagination page={page} pageSize={pageSize} total={query.data.total} onPage={setPage} />
+            </>
+          )}
+        </Card>
+      </Reveal>
     </div>
   );
 }

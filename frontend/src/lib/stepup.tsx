@@ -1,6 +1,8 @@
 import { ShieldCheck } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import { Button, Field, Input, Modal } from "@/components/ui";
+import { Field, Modal } from "@/components/kit";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { api, apiHooks, describeError, type ApiDetail } from "./api";
 
 interface Pending {
@@ -56,7 +58,7 @@ export function StepUpProvider({ children }: { children: ReactNode }) {
         onClose={() => close(false)}
         title={
           <span className="flex items-center gap-2">
-            <ShieldCheck className="h-5 w-5 text-indigo-600" /> Step-up verification required
+            <ShieldCheck className="size-5 text-primary" /> Step-up verification required
           </span>
         }
         description={
@@ -66,7 +68,7 @@ export function StepUpProvider({ children }: { children: ReactNode }) {
         }
         footer={
           <>
-            <Button variant="secondary" onClick={() => close(false)}>
+            <Button variant="outline" onClick={() => close(false)}>
               Cancel
             </Button>
             <Button onClick={submit} loading={busy} disabled={code.trim().length < 6}>
@@ -83,11 +85,11 @@ export function StepUpProvider({ children }: { children: ReactNode }) {
             value={code}
             onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
             onKeyDown={(e) => e.key === "Enter" && code.length === 6 && submit()}
-            className="font-mono text-lg tracking-[0.4em]"
+            className="h-12 text-center font-mono text-lg tracking-[0.4em]"
             placeholder="••••••"
           />
         </Field>
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-[#a33131]">{error}</p>}
       </Modal>
     </>
   );

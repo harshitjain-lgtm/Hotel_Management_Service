@@ -9,4 +9,17 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   server: { host: "localhost", port: 5173 },
+  build: {
+    rollupOptions: {
+      output: {
+        // Long-lived vendor chunks so app changes don't invalidate the large libraries.
+        manualChunks: {
+          react: ["react", "react-dom", "react-dom/client", "react-router-dom", "@tanstack/react-query"],
+          recharts: ["recharts"],
+          motion: ["motion", "gsap", "gsap/ScrollTrigger"],
+          radix: ["radix-ui"],
+        },
+      },
+    },
+  },
 });
