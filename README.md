@@ -122,6 +122,9 @@ For a clean slate between rehearsals, re-run the seed: `python -m scripts.seed -
 * **Control API** (`X-Service-Key`): `POST /control/sessions/revoke`, `/control/staff/{id}/suspend|reinstate`,
   `/control/loyalty/freeze|unfreeze`, `/control/partners/{id}/rotate-key`, `PUT /control/policies/{key}`.
   Each accepts `reason`, `incident_id` and `approved_by`, all recorded in the resulting `control.*` event.
+* **Baseline history:** `python -m scripts.generate_history --days 30` (in `backend/`) writes ~21k *normal* events for
+  the last 30 days to `backend/data/history_events.jsonl`, in the same schema and with real seeded IDs, so detection can learn
+  per-user baselines before the live demo.
 * **Honeytokens:** `backend/data/honeytokens.json` lists 5 decoy VIP guests (and their loyalty accounts). No legitimate
   workflow should touch them, so any event containing those guest IDs is high-confidence.
 
